@@ -122,11 +122,13 @@ void MainWindow::setupMenuBar()
 
 void MainWindow::setupTrayIcon()
 {
+    // Set app icon for window and tray
+    QIcon appIcon(":/icons/app-icon.png");
+    setWindowIcon(appIcon);
+
     m_trayIcon = new QSystemTrayIcon(this);
     m_trayIcon->setToolTip("Nexus - Task Manager");
-
-    // Use a default icon (you can replace with a custom one)
-    m_trayIcon->setIcon(QApplication::style()->standardIcon(QStyle::SP_ComputerIcon));
+    m_trayIcon->setIcon(appIcon);
 
     // Tray context menu
     QMenu *trayMenu = new QMenu(this);

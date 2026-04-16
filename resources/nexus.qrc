@@ -4,5 +4,6 @@
         <file>editor/editor.css</file>
         <file>editor/editor.js</file>
         <file>editor/tiptap-bundle.js</file>
+        <file>icons/app-icon.png</file>
     </qresource>
 </RCC>
