@@ -33,26 +33,30 @@ if not exist "%RELEASE_DIR%\Qt6Core.dll" (
     echo [3/4] Qt DLLs already deployed, skipping.
 )
 
-:: Package to dist (only necessary files)
+:: Package to dist
 echo [4/4] Packaging to dist...
 if exist "%DIST_DIR%" rmdir /S /Q "%DIST_DIR%"
 mkdir "%DIST_DIR%"
 
-:: Core exe
-copy /Y "%RELEASE_DIR%\Nexus.exe" "%DIST_DIR%\"
+:: Copy everything from Release
+xcopy /E /Y /I /Q "%RELEASE_DIR%\*" "%DIST_DIR%\"
 
-:: Required Qt DLLs
-for %%F in (Qt6Core Qt6Gui Qt6Widgets Qt6Sql Qt6Network Qt6Svg Qt6WebChannel Qt6WebEngineCore Qt6WebEngineWidgets) do (
-    copy /Y "%RELEASE_DIR%\%%F.dll" "%DIST_DIR%\" >nul
-)
-
-:: WebEngine process
-copy /Y "%RELEASE_DIR%\QtWebEngineProcess.exe" "%DIST_DIR%\"
+:: Remove unnecessary files to save space
+if exist "%DIST_DIR%\opengl32sw.dll" del /Q "%DIST_DIR%\opengl32sw.dll"
+if exist "%DIST_DIR%\D3Dcompiler_47.dll" del /Q "%DIST_DIR%\D3Dcompiler_47.dll"
+if exist "%DIST_DIR%\translations" rmdir /S /Q "%DIST_DIR%\translations"
+if exist "%DIST_DIR%\generic" rmdir /S /Q "%DIST_DIR%\generic"
+if exist "%DIST_DIR%\position" rmdir /S /Q "%DIST_DIR%\position"
+if exist "%DIST_DIR%\qmltooling" rmdir /S /Q "%DIST_DIR%\qmltooling"
 
 :: MSVC runtime DLLs (so users without VS installed can run the app)
 set VCRT_DIR=
 for /f "delims=" %%V in ('dir /B /AD /O-N "C:\Program Files\Microsoft Visual Studio\2022\IntPreview\VC\Redist\MSVC" 2^>nul') do (
-    if not defined VCRT_DIR set "VCRT_DIR=C:\Program Files\Microsoft Visual Studio\2022\IntPreview\VC\Redist\MSVC\%%V\x64\Microsoft.VC143.CRT"
+    if not defined VCRT_DIR (
+        if exist "C:\Program Files\Microsoft Visual Studio\2022\IntPreview\VC\Redist\MSVC\%%V\x64\Microsoft.VC143.CRT\vcruntime140.dll" (
+            set "VCRT_DIR=C:\Program Files\Microsoft Visual Studio\2022\IntPreview\VC\Redist\MSVC\%%V\x64\Microsoft.VC143.CRT"
+        )
+    )
 )
 if defined VCRT_DIR (
     echo Copying MSVC runtime from %VCRT_DIR%...
@@ -61,18 +65,6 @@ if defined VCRT_DIR (
     )
 ) else (
     echo WARNING: MSVC runtime DLLs not found. Users may need VC++ Redistributable.
-)
-
-:: Required plugin directories
-for %%D in (platforms sqldrivers styles iconengines imageformats tls networkinformation) do (
-    if exist "%RELEASE_DIR%\%%D" (
-        xcopy /E /Y /I /Q "%RELEASE_DIR%\%%D" "%DIST_DIR%\%%D\" >nul
-    )
-)
-
-:: WebEngine resources (needed for QWebEngineView)
-if exist "%RELEASE_DIR%\resources" (
-    xcopy /E /Y /I /Q "%RELEASE_DIR%\resources" "%DIST_DIR%\resources\" >nul
 )
 
 :: Copy database if it exists
@@ -84,7 +76,7 @@ if exist "%DB_SRC%" (
     echo No existing database found at %DB_SRC%, skipping.
 )
 
-:: Show size comparison
+:: Show size
 echo.
 echo === Build complete! ===
 echo Output: %DIST_DIR%\Nexus.exe
