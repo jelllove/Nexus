@@ -49,6 +49,20 @@ for %%F in (Qt6Core Qt6Gui Qt6Widgets Qt6Sql Qt6Network Qt6Svg Qt6WebChannel Qt6
 :: WebEngine process
 copy /Y "%RELEASE_DIR%\QtWebEngineProcess.exe" "%DIST_DIR%\"
 
+:: MSVC runtime DLLs (so users without VS installed can run the app)
+set VCRT_DIR=
+for /f "delims=" %%V in ('dir /B /AD /O-N "C:\Program Files\Microsoft Visual Studio\2022\IntPreview\VC\Redist\MSVC" 2^>nul') do (
+    if not defined VCRT_DIR set "VCRT_DIR=C:\Program Files\Microsoft Visual Studio\2022\IntPreview\VC\Redist\MSVC\%%V\x64\Microsoft.VC143.CRT"
+)
+if defined VCRT_DIR (
+    echo Copying MSVC runtime from %VCRT_DIR%...
+    for %%F in (vcruntime140.dll vcruntime140_1.dll msvcp140.dll msvcp140_1.dll msvcp140_2.dll concrt140.dll) do (
+        if exist "%VCRT_DIR%\%%F" copy /Y "%VCRT_DIR%\%%F" "%DIST_DIR%\" >nul
+    )
+) else (
+    echo WARNING: MSVC runtime DLLs not found. Users may need VC++ Redistributable.
+)
+
 :: Required plugin directories
 for %%D in (platforms sqldrivers styles iconengines imageformats tls networkinformation) do (
     if exist "%RELEASE_DIR%\%%D" (
