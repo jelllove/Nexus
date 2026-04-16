@@ -92,7 +92,7 @@ if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE user32)
 
     # Set application icon
-    # target_sources(${PROJECT_NAME} PRIVATE resources/nexus.rc)
+    target_sources(${PROJECT_NAME} PRIVATE resources/nexus.rc)
 
     # Ensure QtWebEngineProcess is found at runtime
     set_target_properties(${PROJECT_NAME} PROPERTIES
