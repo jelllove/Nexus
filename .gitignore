@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+dist/
+
+# Qt aqtinstall log
+aqtinstall.log
+
+# Editor bundle node_modules
+editor-bundle/node_modules/
+
+# Temporary / planning docs
+findings.md
+progress.md
+task_plan.md
+
+# Claude Code session data
+.claude/
+
+# IDE files
+.vs/
+*.user
+*.suo
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store

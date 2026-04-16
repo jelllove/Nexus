@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file>editor/index.html</file>
+        <file>editor/editor.css</file>
+        <file>editor/editor.js</file>
+        <file>editor/tiptap-bundle.js</file>
+    </qresource>
+</RCC>

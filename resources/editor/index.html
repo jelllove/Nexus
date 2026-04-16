@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Editor</title>
+    <link rel="stylesheet" href="qrc:/editor/editor.css">
+    <!-- TipTap (pre-bundled with all extensions) -->
+    <script src="qrc:/editor/tiptap-bundle.js"></script>
+    <!-- QWebChannel -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+
+    <!-- OneNote-style Ribbon Toolbar -->
+    <div id="ribbon">
+        <!-- Tab bar -->
+        <div id="ribbon-tabs">
+            <button class="ribbon-tab active" onclick="switchTab('home')">Home</button>
+            <button class="ribbon-tab" onclick="switchTab('insert')">Insert</button>
+            <button class="ribbon-tab" onclick="switchTab('view')">View</button>
+        </div>
+
+        <!-- Home Tab -->
+        <div id="tab-home" class="ribbon-panel active">
+            <!-- Clipboard group -->
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="doPaste()" title="Paste">
+                        <span class="ribbon-icon">&#128203;</span>
+                        <span class="ribbon-label">Paste</span>
+                    </button>
+                    <div class="ribbon-btn-stack">
+                        <button class="ribbon-btn ribbon-btn-sm" onclick="doCut()" title="Cut (Ctrl+X)">
+                            <span class="ribbon-icon-sm">&#9986;</span> Cut
+                        </button>
+                        <button class="ribbon-btn ribbon-btn-sm" onclick="doCopy()" title="Copy (Ctrl+C)">
+                            <span class="ribbon-icon-sm">&#128203;</span> Copy
+                        </button>
+                    </div>
+                </div>
+                <span class="ribbon-group-label">Clipboard</span>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <!-- Font group -->
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <div class="ribbon-row">
+                        <select id="fontFamily" onchange="setFontFamily(this.value)" title="Font Family">
+                            <option value="Segoe UI">Segoe UI</option>
+                            <option value="Calibri">Calibri</option>
+                            <option value="Arial">Arial</option>
+                            <option value="Times New Roman">Times New Roman</option>
+                            <option value="Consolas">Consolas</option>
+                            <option value="Georgia">Georgia</option>
+                            <option value="Verdana">Verdana</option>
+                            <option value="Courier New">Courier New</option>
+                        </select>
+                        <select id="fontSize" onchange="setFontSize(this.value)" title="Font Size">
+                            <option value="11px">11</option>
+                            <option value="12px">12</option>
+                            <option value="14px" selected>14</option>
+                            <option value="16px">16</option>
+                            <option value="18px">18</option>
+                            <option value="20px">20</option>
+                            <option value="24px">24</option>
+                            <option value="28px">28</option>
+                            <option value="36px">36</option>
+                        </select>
+                    </div>
+                    <div class="ribbon-row">
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-bold" onclick="toggleBold()" title="Bold (Ctrl+B)"><b>B</b></button>
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-italic" onclick="toggleItalic()" title="Italic (Ctrl+I)"><i>I</i></button>
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-underline" onclick="toggleUnderline()" title="Underline (Ctrl+U)"><u>U</u></button>
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-strike" onclick="toggleStrike()" title="Strikethrough"><s>S</s></button>
+                        <span class="ribbon-mini-sep"></span>
+                        <button class="ribbon-btn ribbon-btn-icon ribbon-color-btn" onclick="toggleHighlight()" title="Text Highlight Color">
+                            <span style="border-bottom: 3px solid #ffeaa7;">ab</span>
+                        </button>
+                        <input type="color" id="textColorPicker" value="#000000" onchange="setTextColor(this.value)" title="Font Color" class="ribbon-color-input">
+                    </div>
+                </div>
+                <span class="ribbon-group-label">Basic Text</span>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <!-- Styles group -->
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <div class="ribbon-row">
+                        <select id="blockStyle" onchange="setBlockStyle(this.value)" title="Styles">
+                            <option value="paragraph">Normal Text</option>
+                            <option value="h1">Heading 1</option>
+                            <option value="h2">Heading 2</option>
+                            <option value="h3">Heading 3</option>
+                            <option value="h4">Heading 4</option>
+                            <option value="blockquote">Quote</option>
+                            <option value="codeblock">Code Block</option>
+                        </select>
+                    </div>
+                    <div class="ribbon-row">
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-align-left" onclick="setTextAlign('left')" title="Align Left">&#8676;</button>
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-align-center" onclick="setTextAlign('center')" title="Align Center">&#8596;</button>
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-align-right" onclick="setTextAlign('right')" title="Align Right">&#8677;</button>
+                    </div>
+                </div>
+                <span class="ribbon-group-label">Styles</span>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <!-- Tags / Lists group -->
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <div class="ribbon-row">
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-task" onclick="toggleTaskList()" title="To Do Tag">&#9744;</button>
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-bullet" onclick="toggleBulletList()" title="Bullet List">&#8226;</button>
+                        <button class="ribbon-btn ribbon-btn-icon" id="btn-ordered" onclick="toggleOrderedList()" title="Numbered List">1.</button>
+                    </div>
+                    <div class="ribbon-row">
+                        <button class="ribbon-btn ribbon-btn-icon" onclick="indentMore()" title="Increase Indent">&#8594;|</button>
+                        <button class="ribbon-btn ribbon-btn-icon" onclick="indentLess()" title="Decrease Indent">|&#8592;</button>
+                    </div>
+                </div>
+                <span class="ribbon-group-label">Tags</span>
+            </div>
+        </div>
+
+        <!-- Insert Tab -->
+        <div id="tab-insert" class="ribbon-panel">
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="requestInsertImage()" title="Insert Picture">
+                        <span class="ribbon-icon">&#128247;</span>
+                        <span class="ribbon-label">Picture</span>
+                    </button>
+                </div>
+                <span class="ribbon-group-label">Images</span>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="insertTable()" title="Insert Table">
+                        <span class="ribbon-icon">&#9638;</span>
+                        <span class="ribbon-label">Table</span>
+                    </button>
+                </div>
+                <span class="ribbon-group-label">Tables</span>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="insertHorizontalRule()" title="Horizontal Line">
+                        <span class="ribbon-icon">&#8213;</span>
+                        <span class="ribbon-label">Line</span>
+                    </button>
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="insertDateTime()" title="Insert Date/Time">
+                        <span class="ribbon-icon">&#128197;</span>
+                        <span class="ribbon-label">Date</span>
+                    </button>
+                </div>
+                <span class="ribbon-group-label">Insert</span>
+            </div>
+        </div>
+
+        <!-- View Tab -->
+        <div id="tab-view" class="ribbon-panel">
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="zoomIn()" title="Zoom In">
+                        <span class="ribbon-icon">&#128269;+</span>
+                        <span class="ribbon-label">Zoom In</span>
+                    </button>
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="zoomOut()" title="Zoom Out">
+                        <span class="ribbon-icon">&#128269;-</span>
+                        <span class="ribbon-label">Zoom Out</span>
+                    </button>
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="zoomReset()" title="Reset Zoom">
+                        <span class="ribbon-icon">100%</span>
+                        <span class="ribbon-label">Reset</span>
+                    </button>
+                </div>
+                <span class="ribbon-group-label">Zoom</span>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="toggleRuleLines()" title="Toggle Rule Lines">
+                        <span class="ribbon-icon">&#9776;</span>
+                        <span class="ribbon-label">Rule Lines</span>
+                    </button>
+                </div>
+                <span class="ribbon-group-label">Page Setup</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Page canvas (OneNote-style) -->
+    <div id="page-canvas">
+        <!-- Editable title area -->
+        <div id="page-title" contenteditable="true" placeholder="Untitled Page" spellcheck="false"></div>
+        <!-- Timestamp -->
+        <div id="page-timestamp"></div>
+        <!-- Main editor content -->
+        <div id="editor"></div>
+    </div>
+
+    <script src="qrc:/editor/editor.js"></script>
+</body>
+</html>

@@ -1,0 +1,533 @@
+/* ============================================================
+   Nexus Editor — OneNote-inspired Styles
+   ============================================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    font-size: 14px;
+    color: #1a1a1a;
+    background-color: #f5f3ef;
+    overflow-y: auto;
+}
+
+/* ============================================================
+   Ribbon Toolbar
+   ============================================================ */
+
+#ribbon {
+    background: linear-gradient(to bottom, #f9f9f9 0%, #eaeaea 100%);
+    border-bottom: 1px solid #c0c0c0;
+    user-select: none;
+    position: sticky;
+    top: 0;
+    z-index: 200;
+}
+
+/* Ribbon tab bar */
+#ribbon-tabs {
+    display: flex;
+    gap: 0;
+    padding: 0 8px;
+    background-color: #7b5ea7;
+    height: 28px;
+    align-items: flex-end;
+}
+
+.ribbon-tab {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.85);
+    font-size: 12px;
+    padding: 4px 16px;
+    cursor: pointer;
+    border-radius: 3px 3px 0 0;
+    transition: background 0.15s;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+.ribbon-tab:hover {
+    background-color: rgba(255,255,255,0.15);
+    color: #fff;
+}
+
+.ribbon-tab.active {
+    background-color: #eaeaea;
+    color: #333;
+    font-weight: 600;
+}
+
+/* Ribbon panels */
+.ribbon-panel {
+    display: none;
+    flex-direction: row;
+    align-items: stretch;
+    padding: 4px 8px 2px 8px;
+    min-height: 72px;
+    gap: 2px;
+}
+
+.ribbon-panel.active {
+    display: flex;
+}
+
+/* Ribbon group */
+.ribbon-group {
+    display: flex;
+    flex-direction: column;
+    padding: 0 8px;
+    gap: 2px;
+}
+
+.ribbon-group-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    justify-content: center;
+}
+
+.ribbon-group-label {
+    text-align: center;
+    font-size: 10px;
+    color: #888;
+    padding: 0 4px 2px 4px;
+    white-space: nowrap;
+}
+
+.ribbon-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.ribbon-divider {
+    width: 1px;
+    background-color: #d0d0d0;
+    margin: 4px 4px;
+    align-self: stretch;
+}
+
+/* Ribbon buttons */
+.ribbon-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: 'Segoe UI', sans-serif;
+    color: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s, border-color 0.1s;
+}
+
+.ribbon-btn:hover {
+    background-color: #cde6f7;
+    border-color: #9ec9e8;
+}
+
+.ribbon-btn:active {
+    background-color: #a8d4f0;
+}
+
+.ribbon-btn.is-active {
+    background-color: #b8d8f0;
+    border-color: #7bbbdf;
+}
+
+.ribbon-btn-lg {
+    flex-direction: column;
+    padding: 4px 10px;
+    min-width: 54px;
+    gap: 2px;
+}
+
+.ribbon-btn-sm {
+    padding: 2px 8px;
+    font-size: 11px;
+    gap: 4px;
+}
+
+.ribbon-btn-icon {
+    width: 26px;
+    height: 24px;
+    font-size: 13px;
+    padding: 0;
+}
+
+.ribbon-icon {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.ribbon-icon-sm {
+    font-size: 12px;
+}
+
+.ribbon-label {
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.ribbon-mini-sep {
+    width: 1px;
+    height: 18px;
+    background-color: #d0d0d0;
+    margin: 0 2px;
+}
+
+.ribbon-btn-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+/* Dropdowns */
+#fontFamily, #fontSize, #blockStyle {
+    height: 24px;
+    border: 1px solid #c0c0c0;
+    border-radius: 3px;
+    background: white;
+    font-size: 11px;
+    font-family: 'Segoe UI', sans-serif;
+    padding: 0 4px;
+    color: #333;
+    cursor: pointer;
+}
+
+#fontFamily {
+    width: 130px;
+}
+
+#fontSize {
+    width: 52px;
+}
+
+#blockStyle {
+    width: 130px;
+}
+
+#fontFamily:hover, #fontSize:hover, #blockStyle:hover {
+    border-color: #7bbbdf;
+}
+
+/* Color picker */
+.ribbon-color-btn {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.ribbon-color-input {
+    width: 26px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid #c0c0c0;
+    border-radius: 3px;
+    cursor: pointer;
+    background: none;
+}
+
+.ribbon-color-input::-webkit-color-swatch-wrapper {
+    padding: 2px;
+}
+
+.ribbon-color-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
+}
+
+/* ============================================================
+   Page Canvas (OneNote-style)
+   ============================================================ */
+
+#page-canvas {
+    max-width: 900px;
+    margin: 0 auto;
+    background-color: #ffffff;
+    min-height: calc(100vh - 104px);
+    padding: 32px 48px 80px 48px;
+    box-shadow: 0 0 12px rgba(0,0,0,0.06);
+    border-left: 1px solid #e0dcd6;
+    border-right: 1px solid #e0dcd6;
+}
+
+/* Rule lines mode */
+body.rule-lines #page-canvas {
+    background-image: repeating-linear-gradient(
+        to bottom,
+        transparent,
+        transparent 27px,
+        #e8e4de 27px,
+        #e8e4de 28px
+    );
+    background-position: 0 0;
+}
+
+/* Editable Page Title */
+#page-title {
+    font-size: 28px;
+    font-weight: 300;
+    color: #4a4a4a;
+    border: none;
+    outline: none;
+    padding: 0 0 4px 0;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #c0bbb3;
+    font-family: 'Segoe UI Light', 'Segoe UI', sans-serif;
+    min-height: 40px;
+    line-height: 1.3;
+}
+
+#page-title:empty::before {
+    content: attr(placeholder);
+    color: #bbb;
+}
+
+#page-title:focus {
+    border-bottom-color: #7b5ea7;
+}
+
+/* Timestamp */
+#page-timestamp {
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 20px;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+/* ============================================================
+   Editor Content (ProseMirror / TipTap)
+   ============================================================ */
+
+#editor {
+    outline: none;
+    min-height: 200px;
+}
+
+.ProseMirror {
+    outline: none;
+    min-height: 200px;
+}
+
+.ProseMirror > * + * {
+    margin-top: 0.5em;
+}
+
+.ProseMirror p {
+    line-height: 1.65;
+    font-size: 14px;
+}
+
+.ProseMirror h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #2b2b2b;
+    margin-top: 20px;
+    margin-bottom: 6px;
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+}
+
+.ProseMirror h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #333;
+    margin-top: 16px;
+    margin-bottom: 4px;
+}
+
+.ProseMirror h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #444;
+    margin-top: 12px;
+    margin-bottom: 4px;
+}
+
+.ProseMirror h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #555;
+    margin-top: 10px;
+    margin-bottom: 2px;
+}
+
+.ProseMirror ul, .ProseMirror ol {
+    padding-left: 28px;
+}
+
+.ProseMirror li {
+    line-height: 1.65;
+}
+
+.ProseMirror li p {
+    margin: 0;
+}
+
+/* Blockquote — OneNote style with purple accent */
+.ProseMirror blockquote {
+    border-left: 3px solid #7b5ea7;
+    padding-left: 16px;
+    margin: 8px 0;
+    color: #555;
+}
+
+/* Inline code */
+.ProseMirror code {
+    background-color: #f0eeeb;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    color: #c7254e;
+}
+
+/* Code block — dark theme */
+.ProseMirror pre {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 8px 0;
+}
+
+.ProseMirror pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+}
+
+/* Images */
+.ProseMirror img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 2px;
+    margin: 8px 0;
+    cursor: default;
+}
+
+.ProseMirror img.ProseMirror-selectednode {
+    outline: 2px solid #7b5ea7;
+}
+
+/* Horizontal rule */
+.ProseMirror hr {
+    border: none;
+    border-top: 1px solid #d0ccc6;
+    margin: 16px 0;
+}
+
+/* Highlight */
+.ProseMirror mark {
+    background-color: #ffeaa7;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+/* ---- Task list (OneNote to-do tags) ---- */
+.ProseMirror ul[data-type="taskList"] {
+    list-style: none;
+    padding-left: 0;
+}
+
+.ProseMirror ul[data-type="taskList"] li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.ProseMirror ul[data-type="taskList"] li > label {
+    flex: 0 0 auto;
+    margin-top: 3px;
+}
+
+.ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    accent-color: #7b5ea7;
+}
+
+.ProseMirror ul[data-type="taskList"] li > div {
+    flex: 1;
+}
+
+.ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div p {
+    text-decoration: line-through;
+    color: #999;
+}
+
+/* ---- Tables ---- */
+.ProseMirror table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+}
+
+.ProseMirror th, .ProseMirror td {
+    border: 1px solid #c0c0c0;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+    min-width: 80px;
+}
+
+.ProseMirror th {
+    background-color: #f0eeeb;
+    font-weight: 600;
+}
+
+.ProseMirror td {
+    background-color: #fff;
+}
+
+.ProseMirror .selectedCell {
+    background-color: #dbeef9;
+}
+
+/* Placeholder */
+.ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: #bbb;
+    pointer-events: none;
+    height: 0;
+    font-style: italic;
+}
+
+/* Text alignment */
+.ProseMirror .has-text-align-center { text-align: center; }
+.ProseMirror .has-text-align-right { text-align: right; }
+.ProseMirror .has-text-align-left { text-align: left; }
+
+/* ============================================================
+   Scrollbar
+   ============================================================ */
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f5f3ef;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c0bbb3;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #a09a92;
+}
