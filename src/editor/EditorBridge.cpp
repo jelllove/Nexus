@@ -1,4 +1,6 @@
 #include "EditorBridge.h"
+#include <QDesktopServices>
+#include <QUrl>
 
 EditorBridge::EditorBridge(QObject *parent)
     : QObject(parent)
@@ -27,4 +29,9 @@ void EditorBridge::loadContent(const QString &content)
 void EditorBridge::requestImageInsert()
 {
     emit imageInsertRequested();
+}
+
+void EditorBridge::openExternalUrl(const QString &url)
+{
+    QDesktopServices::openUrl(QUrl(url));
 }

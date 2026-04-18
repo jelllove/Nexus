@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QWebEngineView>
 #include <QWebChannel>
+#include <QWebEnginePage>
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QTimer>

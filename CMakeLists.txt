@@ -34,6 +34,7 @@ set(SOURCES
     src/editor/EditorBridge.cpp
     src/services/AIService.cpp
     src/services/ImageManager.cpp
+    src/services/UpdateService.cpp
     src/platform/GlobalHotkey.cpp
 )
 
@@ -53,6 +54,7 @@ set(HEADERS
     src/editor/EditorBridge.h
     src/services/AIService.h
     src/services/ImageManager.h
+    src/services/UpdateService.h
     src/platform/GlobalHotkey.h
 )
 
@@ -84,6 +86,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+)
+
+# Pass version to C++ code
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    APP_VERSION="${PROJECT_VERSION}"
 )
 
 # Windows-specific settings

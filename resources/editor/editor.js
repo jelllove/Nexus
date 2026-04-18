@@ -46,6 +46,7 @@ function initEditor() {
     const { TableRow } = window.TipTapTableRow || {};
     const { TableCell } = window.TipTapTableCell || {};
     const { TableHeader } = window.TipTapTableHeader || {};
+    const { Link } = window.TipTapLink || {};
 
     if (!Editor) {
         console.warn('TipTap not loaded, using fallback editor');
@@ -71,6 +72,7 @@ function initEditor() {
     if (TableRow) extensions.push(TableRow);
     if (TableCell) extensions.push(TableCell);
     if (TableHeader) extensions.push(TableHeader);
+    if (Link) extensions.push(Link.configure({ openOnClick: false, autolink: true }));
 
     editor = new Editor({
         element: document.querySelector('#editor'),
@@ -84,6 +86,38 @@ function initEditor() {
         },
         onSelectionUpdate: () => {
             updateToolbarState();
+        }
+    });
+
+    // Ctrl+Click on links -> open in external browser
+    document.querySelector('#editor').addEventListener('click', function(e) {
+        if (e.ctrlKey || e.metaKey) {
+            const link = e.target.closest('a');
+            if (link && link.href) {
+                e.preventDefault();
+                // Use bridge to open URL externally (handled by C++ side)
+                if (bridge) {
+                    bridge.openExternalUrl(link.href);
+                }
+            }
+        }
+    });
+
+    // Tab indent / Shift+Tab outdent
+    document.querySelector('#editor').addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            if (e.shiftKey) {
+                try { editor.chain().focus().liftListItem('listItem').run(); } catch(ex) {}
+            } else {
+                // Try list indent first
+                if (editor.isActive('listItem')) {
+                    try { editor.chain().focus().sinkListItem('listItem').run(); } catch(ex) {}
+                } else {
+                    // Insert 4 spaces as tab stop
+                    editor.chain().focus().insertContent('    ').run();
+                }
+            }
         }
     });
 

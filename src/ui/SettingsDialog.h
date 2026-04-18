@@ -29,4 +29,7 @@ private:
 
     // Database settings
     QLineEdit *m_dbPathEdit;
+
+    // Update settings
+    QCheckBox *m_checkUpdates;
 };

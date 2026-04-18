@@ -10,6 +10,25 @@ set RELEASE_DIR=%BUILD_DIR%\Release
 
 echo === Nexus Build ===
 
+:: Phase 0: Generate .ico from .png if needed
+if not exist "resources\icons\app-icon.ico" (
+    echo [0/4] Generating app icon .ico from .png...
+    python -c "from PIL import Image; img=Image.open(r'resources\icons\app-icon.png'); img.save(r'resources\icons\app-icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+    if errorlevel 1 (
+        echo WARNING: Failed to generate .ico - Python PIL may not be installed
+    )
+) else (
+    :: Regenerate if .png is newer than .ico
+    for %%P in (resources\icons\app-icon.png) do for %%I in (resources\icons\app-icon.ico) do (
+        if "%%~tP" GTR "%%~tI" (
+            echo [0/4] Regenerating app icon .ico ^(png is newer^)...
+            python -c "from PIL import Image; img=Image.open(r'resources\icons\app-icon.png'); img.save(r'resources\icons\app-icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+        ) else (
+            echo [0/4] App icon .ico is up to date, skipping.
+        )
+    )
+)
+
 :: Configure (only if not already configured)
 if not exist "%BUILD_DIR%\CMakeCache.txt" (
     echo [1/4] Configuring CMake...

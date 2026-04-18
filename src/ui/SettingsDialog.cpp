@@ -58,6 +58,15 @@ void SettingsDialog::setupUi()
 
     mainLayout->addWidget(hotkeyGroup);
 
+    // Update Settings Group
+    auto *updateGroup = new QGroupBox("Updates", this);
+    auto *updateLayout = new QFormLayout(updateGroup);
+
+    m_checkUpdates = new QCheckBox("Check for updates on startup", this);
+    updateLayout->addRow(m_checkUpdates);
+
+    mainLayout->addWidget(updateGroup);
+
     // Buttons
     auto *buttonBox = new QDialogButtonBox(
         QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
@@ -74,6 +83,7 @@ void SettingsDialog::loadSettings()
     m_aiApiKey->setText(db.getSetting("ai_api_key"));
     m_aiModel->setText(db.getSetting("ai_model", "gpt-4o-mini"));
     m_hotkeyEdit->setText(db.getSetting("global_hotkey", "Ctrl+Shift+N"));
+    m_checkUpdates->setChecked(db.getSetting("check_updates", "true") == "true");
 }
 
 void SettingsDialog::onSave()
@@ -83,5 +93,6 @@ void SettingsDialog::onSave()
     db.setSetting("ai_api_key", m_aiApiKey->text().trimmed());
     db.setSetting("ai_model", m_aiModel->text().trimmed());
     db.setSetting("global_hotkey", m_hotkeyEdit->text().trimmed());
+    db.setSetting("check_updates", m_checkUpdates->isChecked() ? "true" : "false");
     accept();
 }

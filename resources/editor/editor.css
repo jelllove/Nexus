@@ -496,6 +496,17 @@ body.rule-lines #page-canvas {
     background-color: #dbeef9;
 }
 
+/* Links */
+.ProseMirror a {
+    color: #2980b9;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.ProseMirror a:hover {
+    color: #1a5276;
+}
+
 /* Placeholder */
 .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);

@@ -142,22 +142,34 @@ bool DatabaseManager::createFtsTables()
 bool DatabaseManager::migrateDatabase()
 {
     QSqlQuery query(m_db);
-    // Check if due_date column exists
-    query.exec("PRAGMA table_info(tasks)");
-    bool hasDueDate = false;
-    while (query.next()) {
-        if (query.value(1).toString() == "due_date") {
-            hasDueDate = true;
-            break;
+
+    // Get current DB version (default 1 for existing DBs without version tracking)
+    int dbVersion = getSetting("db_version", "1").toInt();
+
+    // Migration v1 -> v2: add due_date column
+    if (dbVersion < 2) {
+        query.exec("PRAGMA table_info(tasks)");
+        bool hasDueDate = false;
+        while (query.next()) {
+            if (query.value(1).toString() == "due_date") {
+                hasDueDate = true;
+                break;
+            }
         }
-    }
-    if (!hasDueDate) {
-        if (!query.exec("ALTER TABLE tasks ADD COLUMN due_date DATETIME")) {
-            qWarning() << "Failed to add due_date column:" << query.lastError().text();
-            return false;
+        if (!hasDueDate) {
+            if (!query.exec("ALTER TABLE tasks ADD COLUMN due_date DATETIME")) {
+                qWarning() << "Failed to add due_date column:" << query.lastError().text();
+                return false;
+            }
+            qInfo() << "Migration v2: added due_date column to tasks table";
         }
-        qInfo() << "Migration: added due_date column to tasks table";
+        setSetting("db_version", "2");
+        dbVersion = 2;
     }
+
+    // Future migrations go here:
+    // if (dbVersion < 3) { ... setSetting("db_version", "3"); dbVersion = 3; }
+
     return true;
 }
 

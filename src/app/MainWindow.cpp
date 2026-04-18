@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "ui/SettingsDialog.h"
 #include "services/AIService.h"
+#include "services/UpdateService.h"
 #include "platform/GlobalHotkey.h"
 #include "db/DatabaseManager.h"
 #include <QCloseEvent>
@@ -11,6 +12,8 @@
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QApplication>
+#include <QDesktopServices>
+#include <QProcess>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -37,6 +40,9 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1400, 800);
 
     statusBar()->showMessage("Ready");
+
+    // Check for updates
+    checkForUpdates();
 }
 
 MainWindow::~MainWindow()
@@ -117,6 +123,33 @@ void MainWindow::setupMenuBar()
     focusSearchAction->setShortcut(QKeySequence("Ctrl+F"));
     connect(focusSearchAction, &QAction::triggered, this, [this]() {
         m_searchBar->setFocus();
+    });
+
+    // Help menu
+    QMenu *helpMenu = menuBar->addMenu("&Help");
+
+    QAction *aboutAction = helpMenu->addAction("&About Nexus...");
+    connect(aboutAction, &QAction::triggered, this, [this]() {
+        QMessageBox aboutBox(this);
+        aboutBox.setWindowTitle("About Nexus");
+        aboutBox.setIconPixmap(QPixmap(":/icons/app-icon.png").scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        aboutBox.setTextFormat(Qt::RichText);
+        aboutBox.setText(
+            QString("<h2>Nexus v%1</h2>").arg(qApp->applicationVersion()) +
+            "<p>Personal Task Management</p>"
+            "<p>"
+            "<b>GitHub:</b> <a href=\"https://github.com/jelllove/Nexus\">github.com/jelllove/Nexus</a><br>"
+            "<b>Website:</b> <a href=\"https://www.jelllove.com\">www.jelllove.com</a><br>"
+            "<b>Email:</b> <a href=\"mailto:jelllove@gmail.com\">jelllove@gmail.com</a>"
+            "</p>"
+        );
+        aboutBox.exec();
+    });
+
+    QAction *checkUpdateAction = helpMenu->addAction("Check for &Updates...");
+    connect(checkUpdateAction, &QAction::triggered, this, [this]() {
+        statusBar()->showMessage("Checking for updates...");
+        checkForUpdates();
     });
 }
 
@@ -281,4 +314,77 @@ void MainWindow::showSettings()
 {
     SettingsDialog dialog(this);
     dialog.exec();
+}
+
+void MainWindow::checkForUpdates()
+{
+    QString checkUpdates = DatabaseManager::instance().getSetting("check_updates", "true");
+    if (checkUpdates != "true") return;
+
+    auto &updater = UpdateService::instance();
+
+    // Disconnect previous connections to avoid duplicates
+    disconnect(&updater, &UpdateService::updateAvailable, this, nullptr);
+    disconnect(&updater, &UpdateService::downloadProgress, this, nullptr);
+    disconnect(&updater, &UpdateService::downloadFinished, this, nullptr);
+    disconnect(&updater, &UpdateService::error, this, nullptr);
+
+    connect(&updater, &UpdateService::updateAvailable,
+            this, &MainWindow::onUpdateAvailable);
+    connect(&updater, &UpdateService::downloadProgress,
+            this, &MainWindow::onDownloadProgress);
+    connect(&updater, &UpdateService::downloadFinished,
+            this, &MainWindow::onDownloadFinished);
+    connect(&updater, &UpdateService::error,
+            this, [this](const QString &msg) {
+                statusBar()->showMessage("Update: " + msg, 5000);
+            });
+
+    updater.checkForUpdate();
+}
+
+void MainWindow::onUpdateAvailable(const QString &latestVersion,
+                                    const QString &downloadUrl,
+                                    const QString &releaseNotes)
+{
+    // Truncate release notes for display
+    QString notes = releaseNotes.left(500);
+    if (releaseNotes.length() > 500) notes += "...";
+
+    int ret = QMessageBox::question(this, "Update Available",
+        QString("A new version of Nexus is available!\n\n"
+                "Current version: v%1\n"
+                "Latest version: %2\n\n"
+                "%3\n\n"
+                "Would you like to download and install the update?")
+            .arg(qApp->applicationVersion(), latestVersion, notes),
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (ret == QMessageBox::Yes) {
+        statusBar()->showMessage("Downloading update...");
+        UpdateService::instance().downloadAndInstall(downloadUrl);
+    }
+}
+
+void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
+{
+    if (bytesTotal > 0) {
+        int percent = static_cast<int>(bytesReceived * 100 / bytesTotal);
+        statusBar()->showMessage(QString("Downloading update... %1%").arg(percent));
+    }
+}
+
+void MainWindow::onDownloadFinished(const QString &installerPath)
+{
+    statusBar()->showMessage("Download complete. Launching installer...");
+
+    // Launch the installer and quit
+    bool started = QProcess::startDetached(installerPath, QStringList());
+    if (started) {
+        qApp->quit();
+    } else {
+        QMessageBox::warning(this, "Update Error",
+            "Failed to launch the installer.\n"
+            "The installer was saved to:\n" + installerPath);
+    }
 }

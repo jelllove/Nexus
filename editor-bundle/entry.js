@@ -15,6 +15,7 @@ import { Table } from '@tiptap/extension-table'
 import { TableRow } from '@tiptap/extension-table-row'
 import { TableCell } from '@tiptap/extension-table-cell'
 import { TableHeader } from '@tiptap/extension-table-header'
+import { Link } from '@tiptap/extension-link'
 
 // Expose on window for use by editor.js
 window.TipTapCore = { Editor }
@@ -33,3 +34,4 @@ window.TipTapTable = { Table }
 window.TipTapTableRow = { TableRow }
 window.TipTapTableCell = { TableCell }
 window.TipTapTableHeader = { TableHeader }
+window.TipTapLink = { Link }

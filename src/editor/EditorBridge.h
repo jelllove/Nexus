@@ -27,6 +27,9 @@ public slots:
     // Called from JavaScript to request image insertion
     void requestImageInsert();
 
+    // Called from JavaScript to open a URL in external browser
+    void openExternalUrl(const QString &url);
+
 signals:
     void contentChanged(const QString &content);
     void editorReady();

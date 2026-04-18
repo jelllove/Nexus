@@ -3,6 +3,24 @@
 #include "services/ImageManager.h"
 #include <QFileDialog>
 #include <QUrl>
+#include <QDesktopServices>
+#include <QWebEnginePage>
+
+// Custom page that intercepts link clicks and opens them externally
+class EditorWebPage : public QWebEnginePage
+{
+public:
+    using QWebEnginePage::QWebEnginePage;
+
+    bool acceptNavigationRequest(const QUrl &url, NavigationType type, bool /*isMainFrame*/) override
+    {
+        if (type == NavigationTypeLinkClicked) {
+            QDesktopServices::openUrl(url);
+            return false;
+        }
+        return QWebEnginePage::acceptNavigationRequest(url, type, true);
+    }
+};
 
 EditorPane::EditorPane(QWidget *parent)
     : QWidget(parent)
@@ -24,6 +42,11 @@ void EditorPane::setupUi()
 
     // WebEngine view — the ribbon toolbar is now inside the HTML
     m_webView = new QWebEngineView(this);
+
+    // Use custom page to intercept link clicks
+    auto *page = new EditorWebPage(m_webView);
+    m_webView->setPage(page);
+
     m_channel = new QWebChannel(this);
     m_bridge = new EditorBridge(this);
 

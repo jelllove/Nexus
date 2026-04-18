@@ -8,6 +8,8 @@
 #include "ui/EditorPane.h"
 #include "ui/SearchBar.h"
 
+class UpdateService;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -31,6 +33,9 @@ private slots:
     void onTitleGenerated(const QString &title);
     void onAIError(const QString &message);
     void showSettings();
+    void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl, const QString &releaseNotes);
+    void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
+    void onDownloadFinished(const QString &installerPath);
 
 private:
     void setupUi();
@@ -38,6 +43,7 @@ private:
     void setupGlobalHotkey();
     void setupMenuBar();
     void toggleVisibility();
+    void checkForUpdates();
 
     // UI components
     QSplitter *m_splitter;
