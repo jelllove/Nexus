@@ -142,12 +142,22 @@ void TaskPane::setupContextMenu()
             dueDateAction = menu.addAction("Set Due Date...");
         }
 
+        // Complete/Uncomplete toggle
+        bool isCompleted = index.data(TaskListModel::CompletedRole).toBool();
+        QAction *completeAction = nullptr;
+        if (isCompleted) {
+            completeAction = menu.addAction("Mark Incomplete");
+        } else {
+            completeAction = menu.addAction(QString::fromUtf8("\xE2\x9C\x85 Mark Complete"));
+        }
+
+        // Archive/Reactivate
         bool isArchived = (m_model->currentStatus() == TaskStatus::Archived);
         QAction *archiveAction = nullptr;
         if (isArchived) {
             archiveAction = menu.addAction("Reactivate");
         } else {
-            archiveAction = menu.addAction("Complete (Archive)");
+            archiveAction = menu.addAction("Archive");
         }
 
         menu.addSeparator();
@@ -173,6 +183,13 @@ void TaskPane::setupContextMenu()
             }
         } else if (selected == clearDueDateAction) {
             DatabaseManager::instance().updateTaskDueDate(taskId, QDateTime());
+            m_model->refresh();
+        } else if (selected == completeAction) {
+            if (isCompleted) {
+                DatabaseManager::instance().uncompleteTask(taskId);
+            } else {
+                DatabaseManager::instance().completeTask(taskId);
+            }
             m_model->refresh();
         } else if (selected == archiveAction) {
             if (isArchived) {

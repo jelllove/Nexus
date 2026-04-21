@@ -28,6 +28,8 @@ struct Task {
     QDateTime updatedAt;
     QDateTime archivedAt;
     QDateTime dueDate;
+    bool completed = false;
+    QDateTime completedAt;
 
     static QString dueDateIcon(int taskId) {
         static const QString icons[] = {
@@ -61,5 +63,35 @@ struct Task {
             case TaskPriority::Low:      return QColor("#95a5a6");  // Gray
         }
         return QColor("#3498db");
+    }
+
+    static QColor priorityBackgroundColor(TaskPriority p) {
+        switch (p) {
+            case TaskPriority::Critical: return QColor("#fdf0ef");  // Very light red
+            case TaskPriority::High:     return QColor("#fef5ec");  // Very light orange
+            case TaskPriority::Medium:   return QColor("#edf5fc");  // Very light blue
+            case TaskPriority::Low:      return QColor("#f4f5f5");  // Very light gray
+        }
+        return QColor("#edf5fc");
+    }
+
+    static QColor priorityBarColor(TaskPriority p) {
+        switch (p) {
+            case TaskPriority::Critical: return QColor("#f1948a");  // Muted red
+            case TaskPriority::High:     return QColor("#f0b27a");  // Muted orange
+            case TaskPriority::Medium:   return QColor("#85c1e9");  // Muted blue
+            case TaskPriority::Low:      return QColor("#c5cccd");  // Muted gray
+        }
+        return QColor("#85c1e9");
+    }
+
+    static QColor priorityBarTrackColor(TaskPriority p) {
+        switch (p) {
+            case TaskPriority::Critical: return QColor("#f9dbd8");  // Lighter red
+            case TaskPriority::High:     return QColor("#fce4cc");  // Lighter orange
+            case TaskPriority::Medium:   return QColor("#d4e6f6");  // Lighter blue
+            case TaskPriority::Low:      return QColor("#e8eaeb");  // Lighter gray
+        }
+        return QColor("#d4e6f6");
     }
 };

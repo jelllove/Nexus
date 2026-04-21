@@ -34,6 +34,8 @@ public:
     bool updateTaskDueDate(int taskId, const QDateTime &dueDate);
     bool archiveTask(int taskId);
     bool reactivateTask(int taskId);
+    bool completeTask(int taskId);
+    bool uncompleteTask(int taskId);
     bool deleteTask(int taskId);
     bool reorderTasks(const QList<int> &taskIds);
 

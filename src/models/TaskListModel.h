@@ -20,7 +20,8 @@ public:
         CreatedAtRole,
         UpdatedAtRole,
         DueDateRole,
-        DueDateIconRole
+        DueDateIconRole,
+        CompletedRole
     };
 
     explicit TaskListModel(QObject *parent = nullptr);

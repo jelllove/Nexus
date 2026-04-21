@@ -167,8 +167,33 @@ bool DatabaseManager::migrateDatabase()
         dbVersion = 2;
     }
 
+    // Migration v2 -> v3: add completed and completed_at columns
+    if (dbVersion < 3) {
+        query.exec("PRAGMA table_info(tasks)");
+        bool hasCompleted = false;
+        while (query.next()) {
+            if (query.value(1).toString() == "completed") {
+                hasCompleted = true;
+                break;
+            }
+        }
+        if (!hasCompleted) {
+            if (!query.exec("ALTER TABLE tasks ADD COLUMN completed INTEGER DEFAULT 0")) {
+                qWarning() << "Failed to add completed column:" << query.lastError().text();
+                return false;
+            }
+            if (!query.exec("ALTER TABLE tasks ADD COLUMN completed_at DATETIME")) {
+                qWarning() << "Failed to add completed_at column:" << query.lastError().text();
+                return false;
+            }
+            qInfo() << "Migration v3: added completed, completed_at columns to tasks table";
+        }
+        setSetting("db_version", "3");
+        dbVersion = 3;
+    }
+
     // Future migrations go here:
-    // if (dbVersion < 3) { ... setSetting("db_version", "3"); dbVersion = 3; }
+    // if (dbVersion < 4) { ... setSetting("db_version", "4"); dbVersion = 4; }
 
     return true;
 }
@@ -273,7 +298,7 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
     QString statusStr = (status == TaskStatus::Active) ? "active" : "archived";
     query.prepare(
         "SELECT id, product_id, title, content, priority, status, sort_order, "
-        "created_at, updated_at, archived_at, due_date "
+        "created_at, updated_at, archived_at, due_date, completed, completed_at "
         "FROM tasks WHERE product_id = ? AND status = ? "
         "ORDER BY priority ASC, CASE WHEN due_date IS NOT NULL THEN 0 ELSE 1 END, due_date ASC, sort_order ASC, id DESC");
     query.addBindValue(productId);
@@ -293,6 +318,8 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
         t.updatedAt = query.value(8).toDateTime();
         t.archivedAt = query.value(9).toDateTime();
         t.dueDate = query.value(10).toDateTime();
+        t.completed = query.value(11).toBool();
+        t.completedAt = query.value(12).toDateTime();
         tasks.append(t);
     }
     return tasks;
@@ -304,7 +331,7 @@ Task DatabaseManager::getTask(int id)
     QSqlQuery query(m_db);
     query.prepare(
         "SELECT id, product_id, title, content, priority, status, sort_order, "
-        "created_at, updated_at, archived_at, due_date "
+        "created_at, updated_at, archived_at, due_date, completed, completed_at "
         "FROM tasks WHERE id = ?");
     query.addBindValue(id);
     if (query.exec() && query.next()) {
@@ -319,6 +346,8 @@ Task DatabaseManager::getTask(int id)
         t.updatedAt = query.value(8).toDateTime();
         t.archivedAt = query.value(9).toDateTime();
         t.dueDate = query.value(10).toDateTime();
+        t.completed = query.value(11).toBool();
+        t.completedAt = query.value(12).toDateTime();
     }
     return t;
 }
@@ -431,6 +460,30 @@ bool DatabaseManager::archiveTask(int taskId)
     return false;
 }
 
+bool DatabaseManager::completeTask(int taskId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE tasks SET completed = 1, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(taskId);
+    if (query.exec()) {
+        emit taskUpdated(taskId);
+        return true;
+    }
+    return false;
+}
+
+bool DatabaseManager::uncompleteTask(int taskId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE tasks SET completed = 0, completed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(taskId);
+    if (query.exec()) {
+        emit taskUpdated(taskId);
+        return true;
+    }
+    return false;
+}
+
 bool DatabaseManager::reactivateTask(int taskId)
 {
     QSqlQuery query(m_db);
@@ -524,7 +577,8 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
     QString sql;
     if (productId > 0) {
         sql = "SELECT t.id, t.product_id, t.title, t.content, t.priority, t.status, "
-              "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date "
+              "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, "
+              "t.completed, t.completed_at "
               "FROM tasks t INNER JOIN tasks_fts f ON t.id = f.rowid "
               "WHERE tasks_fts MATCH ? AND t.product_id = ? "
               "ORDER BY rank";
@@ -533,7 +587,8 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         q.addBindValue(productId);
     } else {
         sql = "SELECT t.id, t.product_id, t.title, t.content, t.priority, t.status, "
-              "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date "
+              "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, "
+              "t.completed, t.completed_at "
               "FROM tasks t INNER JOIN tasks_fts f ON t.id = f.rowid "
               "WHERE tasks_fts MATCH ? "
               "ORDER BY rank";
@@ -548,7 +603,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         if (productId > 0) {
             q.prepare(
                 "SELECT id, product_id, title, content, priority, status, sort_order, "
-                "created_at, updated_at, archived_at, due_date FROM tasks "
+                "created_at, updated_at, archived_at, due_date, completed, completed_at FROM tasks "
                 "WHERE (title LIKE ? OR content LIKE ?) AND product_id = ?");
             q.addBindValue(likeQuery);
             q.addBindValue(likeQuery);
@@ -556,7 +611,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         } else {
             q.prepare(
                 "SELECT id, product_id, title, content, priority, status, sort_order, "
-                "created_at, updated_at, archived_at, due_date FROM tasks "
+                "created_at, updated_at, archived_at, due_date, completed, completed_at FROM tasks "
                 "WHERE title LIKE ? OR content LIKE ?");
             q.addBindValue(likeQuery);
             q.addBindValue(likeQuery);
@@ -577,6 +632,8 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         t.updatedAt = q.value(8).toDateTime();
         t.archivedAt = q.value(9).toDateTime();
         t.dueDate = q.value(10).toDateTime();
+        t.completed = q.value(11).toBool();
+        t.completedAt = q.value(12).toDateTime();
         tasks.append(t);
     }
     return tasks;

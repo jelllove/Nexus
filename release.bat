@@ -1,13 +1,8 @@
 @echo off
 setlocal
 
-:: Extract version from CMakeLists.txt
-set VERSION=
-for /f "usebackq tokens=*" %%L in (`findstr /C:"project(Nexus VERSION" CMakeLists.txt`) do (
-    for %%W in (%%L) do (
-        echo %%W | findstr /R "^[0-9][0-9]*\.[0-9]" >nul && if not defined VERSION set "VERSION=%%W"
-    )
-)
+:: Extract version from CMakeLists.txt using PowerShell
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "(Select-String -Path CMakeLists.txt -Pattern 'project\(Nexus VERSION (\S+)').Matches[0].Groups[1].Value"`) do set "VERSION=%%V"
 if not defined VERSION (
     echo ERROR: Could not extract version from CMakeLists.txt
     exit /b 1

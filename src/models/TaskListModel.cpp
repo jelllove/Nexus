@@ -43,6 +43,8 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
             return t.dueDate;
         case DueDateIconRole:
             return Task::dueDateIcon(t.id);
+        case CompletedRole:
+            return t.completed;
     }
     return QVariant();
 }
