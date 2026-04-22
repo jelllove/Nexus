@@ -21,7 +21,8 @@ public:
         UpdatedAtRole,
         DueDateRole,
         DueDateIconRole,
-        CompletedRole
+        WorkStatusRole,
+        WorkStatusIconRole
     };
 
     explicit TaskListModel(QObject *parent = nullptr);

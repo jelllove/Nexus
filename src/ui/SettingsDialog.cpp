@@ -6,6 +6,9 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QSettings>
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
@@ -19,6 +22,26 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 void SettingsDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
+
+    // Database Settings Group
+    auto *dbGroup = new QGroupBox("Database", this);
+    auto *dbLayout = new QFormLayout(dbGroup);
+
+    auto *dbPathLayout = new QHBoxLayout();
+    m_dbPathEdit = new QLineEdit(this);
+    m_dbPathEdit->setReadOnly(true);
+    dbPathLayout->addWidget(m_dbPathEdit);
+    auto *browseBtn = new QPushButton("Browse...", this);
+    dbPathLayout->addWidget(browseBtn);
+    dbLayout->addRow("Database Path:", dbPathLayout);
+
+    QLabel *dbNote = new QLabel("Changing the path will move the database file to the new location.", this);
+    dbNote->setStyleSheet("color: #7f8c8d; font-size: 11px;");
+    dbLayout->addRow(dbNote);
+
+    connect(browseBtn, &QPushButton::clicked, this, &SettingsDialog::onBrowseDbPath);
+
+    mainLayout->addWidget(dbGroup);
 
     // AI Settings Group
     auto *aiGroup = new QGroupBox("AI Integration", this);
@@ -79,6 +102,7 @@ void SettingsDialog::setupUi()
 void SettingsDialog::loadSettings()
 {
     auto &db = DatabaseManager::instance();
+    m_dbPathEdit->setText(db.currentDbPath());
     m_aiEndpoint->setText(db.getSetting("ai_endpoint", "https://api.openai.com/v1/chat/completions"));
     m_aiApiKey->setText(db.getSetting("ai_api_key"));
     m_aiModel->setText(db.getSetting("ai_model", "gpt-4o-mini"));
@@ -89,10 +113,36 @@ void SettingsDialog::loadSettings()
 void SettingsDialog::onSave()
 {
     auto &db = DatabaseManager::instance();
+
+    // Handle DB path change
+    QString newDbPath = m_dbPathEdit->text().trimmed();
+    if (!newDbPath.isEmpty() && newDbPath != db.currentDbPath()) {
+        if (!db.moveDatabase(newDbPath)) {
+            QMessageBox::warning(this, "Error", "Failed to move database to the new location.");
+            return;
+        }
+        // Save the new path to QSettings (read before DB opens)
+        QSettings settings;
+        settings.setValue("db_path", newDbPath);
+    }
+
     db.setSetting("ai_endpoint", m_aiEndpoint->text().trimmed());
     db.setSetting("ai_api_key", m_aiApiKey->text().trimmed());
     db.setSetting("ai_model", m_aiModel->text().trimmed());
     db.setSetting("global_hotkey", m_hotkeyEdit->text().trimmed());
     db.setSetting("check_updates", m_checkUpdates->isChecked() ? "true" : "false");
     accept();
+}
+
+void SettingsDialog::onBrowseDbPath()
+{
+    QString current = m_dbPathEdit->text();
+    QString dir = QFileInfo(current).absolutePath();
+    QString path = QFileDialog::getSaveFileName(
+        this, "Choose Database Location", dir + "/nexus.db",
+        "SQLite Database (*.db)", nullptr,
+        QFileDialog::DontConfirmOverwrite);
+    if (!path.isEmpty()) {
+        m_dbPathEdit->setText(path);
+    }
 }

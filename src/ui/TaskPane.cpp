@@ -142,13 +142,23 @@ void TaskPane::setupContextMenu()
             dueDateAction = menu.addAction("Set Due Date...");
         }
 
-        // Complete/Uncomplete toggle
-        bool isCompleted = index.data(TaskListModel::CompletedRole).toBool();
-        QAction *completeAction = nullptr;
-        if (isCompleted) {
-            completeAction = menu.addAction("Mark Incomplete");
-        } else {
-            completeAction = menu.addAction(QString::fromUtf8("\xE2\x9C\x85 Mark Complete"));
+        // Work status submenu
+        int currentWorkStatus = index.data(TaskListModel::WorkStatusRole).toInt();
+        QMenu *statusMenu = menu.addMenu("Set Status");
+        statusMenu->setStyleSheet(menu.styleSheet());
+        QAction *statusActions[5];
+        const char *statusLabels[] = {
+            "\xE2\x8F\xAF\xEF\xB8\x8F Not Started",           // ⏯️
+            "\xF0\x9F\x8F\x83 Ongoing",               // 🏃
+            "\xE2\x8F\xB8\xEF\xB8\x8F Paused",       // ⏸️
+            "\xE2\x9C\x85 Completed",                  // ✅
+            "\xE2\x8F\xB3 Waiting"                     // ⏳
+        };
+        for (int i = 0; i < 5; ++i) {
+            statusActions[i] = statusMenu->addAction(QString::fromUtf8(statusLabels[i]));
+            if (i == currentWorkStatus) {
+                statusActions[i]->setEnabled(false);
+            }
         }
 
         // Archive/Reactivate
@@ -184,14 +194,18 @@ void TaskPane::setupContextMenu()
         } else if (selected == clearDueDateAction) {
             DatabaseManager::instance().updateTaskDueDate(taskId, QDateTime());
             m_model->refresh();
-        } else if (selected == completeAction) {
-            if (isCompleted) {
-                DatabaseManager::instance().uncompleteTask(taskId);
-            } else {
-                DatabaseManager::instance().completeTask(taskId);
+        }
+
+        // Check status actions
+        for (int i = 0; i < 5; ++i) {
+            if (selected == statusActions[i]) {
+                DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
+                m_model->refresh();
+                return;
             }
-            m_model->refresh();
-        } else if (selected == archiveAction) {
+        }
+
+        if (selected == archiveAction) {
             if (isArchived) {
                 onReactivateTask();
             } else {

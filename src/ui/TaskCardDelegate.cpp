@@ -14,12 +14,11 @@ QRect TaskCardDelegate::priorityBadgeRect(const QStyleOptionViewItem &option,
                                            const QModelIndex &index)
 {
     QRect rect = option.rect.adjusted(4, 2, -4, -2);
-    // Account for separator space
     if (index.row() > 0) {
         int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
         int curPriority = index.data(TaskListModel::PriorityRole).toInt();
         if (curPriority != prevPriority) {
-            rect.adjust(0, 20, 0, 0);  // separator height
+            rect.adjust(0, 20, 0, 0);
         }
     }
     QString priorityText = index.data(TaskListModel::PriorityTextRole).toString();
@@ -28,6 +27,24 @@ QRect TaskCardDelegate::priorityBadgeRect(const QStyleOptionViewItem &option,
     QFontMetrics badgeFm(badgeFont);
     int badgeWidth = badgeFm.horizontalAdvance(priorityText) + 12;
     return QRect(rect.right() - badgeWidth - 8, rect.top() + 8, badgeWidth, 18);
+}
+
+// Draw status icon (left side, no background)
+static void drawStatusBadge(QPainter *painter, const QRect &cardRect,
+                            TaskWorkStatus ws, const QFont &baseFont)
+{
+    QString icon = Task::workStatusIcon(ws);
+
+    QFont statusFont = baseFont;
+    statusFont.setPointSize(11);
+    painter->setFont(statusFont);
+
+    int badgeX = cardRect.left() + 8;
+    int badgeY = cardRect.top() + 8;
+    QRect iconRect(badgeX, badgeY, 20, 20);
+
+    painter->setPen(QColor("#2c3e50"));
+    painter->drawText(iconRect, Qt::AlignCenter, icon);
 }
 
 void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option,
@@ -39,21 +56,18 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
     QRect fullRect = option.rect.adjusted(4, 2, -4, -2);
     QRect rect = fullRect;
 
-    // Priority separator line between different priority groups
+    // Priority separator
     int curPriority = index.data(TaskListModel::PriorityRole).toInt();
     if (index.row() > 0) {
         int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
         if (curPriority != prevPriority) {
             int sepY = fullRect.top() + 8;
             QColor sepColor("#d5dbdb");
-
-            // Draw separator line
             painter->setPen(QPen(sepColor, 1, Qt::SolidLine));
             painter->drawLine(fullRect.left() + 8, sepY, fullRect.right() - 8, sepY);
 
-            // Draw priority group label
             QString label = Task::priorityToString(static_cast<TaskPriority>(curPriority));
-            label = label.left(label.indexOf(" -"));  // Just "P0", "P1", etc.
+            label = label.left(label.indexOf(" -"));
             QFont labelFont = option.font;
             labelFont.setPointSize(7);
             labelFont.setBold(true);
@@ -61,27 +75,114 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
             QFontMetrics fm(labelFont);
             int labelW = fm.horizontalAdvance(label) + 8;
             QRect labelBg(fullRect.left() + 12, sepY - 6, labelW, 12);
-
-            // Background to cover the line
             painter->fillRect(labelBg, QColor("#ecf0f1"));
             painter->setPen(sepColor);
             painter->drawText(labelBg, Qt::AlignCenter, label);
 
-            // Shift card rect below separator
             rect.adjust(0, 20, 0, 0);
         }
     }
 
-    // Get priority info for coordinated colors
     QColor priorityColor = index.data(TaskListModel::PriorityColorRole).value<QColor>();
     TaskPriority prio = static_cast<TaskPriority>(curPriority);
     QColor bgColor = Task::priorityBackgroundColor(prio);
     QColor barFillColor = Task::priorityBarColor(prio);
     QColor barTrackColor = Task::priorityBarTrackColor(prio);
 
-    // Background — priority-tinted
+    TaskWorkStatus workStatus = static_cast<TaskWorkStatus>(
+        index.data(TaskListModel::WorkStatusRole).toInt());
+    bool isCompleted = (workStatus == TaskWorkStatus::Completed);
+
+    // --- Completed tasks: dimmed style, no progress bar ---
+    if (isCompleted) {
+        QColor mutedBg;
+        if (option.state & QStyle::State_Selected) {
+            mutedBg = QColor("#e0e3e5");
+            painter->fillRect(rect, mutedBg);
+            painter->setPen(QPen(QColor("#b0b8bc"), 1));
+            painter->drawRoundedRect(rect, 4, 4);
+        } else if (option.state & QStyle::State_MouseOver) {
+            painter->fillRect(rect, QColor("#e8eaec"));
+        } else {
+            painter->fillRect(rect, QColor("#f0f1f2"));
+        }
+
+        // Muted left color bar
+        QColor mutedBar = priorityColor;
+        mutedBar.setAlpha(90);
+        painter->fillRect(QRect(rect.left(), rect.top(), 4, rect.height()), mutedBar);
+
+        // Status badge
+        drawStatusBadge(painter, rect, workStatus, option.font);
+
+        // Title (word wrap, avoid priority badge)
+        QString title = index.data(TaskListModel::TitleRole).toString();
+        QFont titleFont = option.font;
+        titleFont.setPointSize(11);
+        titleFont.setBold(true);
+        painter->setFont(titleFont);
+        painter->setPen(QColor("#95a5a6"));
+        // Leave space for status icon (28px) and priority badge on right
+        QRect prioBadge = priorityBadgeRect(option, index);
+        int titleRight = prioBadge.left() - 4;
+        QRect titleRect(rect.left() + 28, rect.top() + 8, titleRight - rect.left() - 28, 20);
+        painter->drawText(titleRect, Qt::AlignLeft | Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(title, Qt::ElideRight, titleRect.width()));
+
+        // Priority badge — muted
+        QString priorityText = index.data(TaskListModel::PriorityTextRole).toString();
+        QRect badgeRect = prioBadge;
+        QFont badgeFont = option.font;
+        badgeFont.setPointSize(8);
+        painter->setFont(badgeFont);
+        QColor mutedBadge = priorityColor;
+        mutedBadge.setAlpha(100);
+        painter->setBrush(mutedBadge);
+        painter->setPen(Qt::NoPen);
+        painter->drawRoundedRect(badgeRect, 9, 9);
+        painter->setPen(QColor(255, 255, 255, 200));
+        painter->drawText(badgeRect, Qt::AlignCenter, priorityText);
+
+        // Content preview
+        QString content = index.data(TaskListModel::ContentRole).toString();
+        content.remove(QRegularExpression("<[^>]*>"));
+        content = content.trimmed();
+        if (!content.isEmpty()) {
+            QFont contentFont = option.font;
+            contentFont.setPointSize(9);
+            painter->setFont(contentFont);
+            painter->setPen(QColor("#b0b8bc"));
+            QRect contentRect(rect.left() + 12, rect.top() + 32, rect.width() - 20, 36);
+            painter->drawText(contentRect, Qt::AlignLeft | Qt::TextWordWrap,
+                              painter->fontMetrics().elidedText(content, Qt::ElideRight,
+                                                                contentRect.width() * 2));
+        }
+
+        // Dates
+        QDateTime createdAt = index.data(TaskListModel::CreatedAtRole).toDateTime();
+        QDateTime updatedAt = index.data(TaskListModel::UpdatedAtRole).toDateTime();
+        QFont dateFont = option.font;
+        dateFont.setPointSize(8);
+        painter->setFont(dateFont);
+        painter->setPen(QColor("#bdc3c7"));
+        QString dateStr;
+        if (createdAt.isValid())
+            dateStr += QString::fromUtf8("\xF0\x9F\x93\x85 ") + createdAt.toString("MM-dd hh:mm");
+        if (updatedAt.isValid())
+            dateStr += QString::fromUtf8("  \xE2\x9C\x8F\xEF\xB8\x8F ") + updatedAt.toString("MM-dd hh:mm");
+        if (!dateStr.isEmpty()) {
+            QRect dateRect(rect.left() + 12, rect.bottom() - 18, rect.width() - 20, 14);
+            painter->drawText(dateRect, Qt::AlignLeft | Qt::AlignVCenter, dateStr);
+        }
+
+        painter->restore();
+        return;
+    }
+
+    // --- Active (non-completed) task rendering ---
+
+    // Background
     if (option.state & QStyle::State_Selected) {
-        // Selected: slightly more saturated version of priority bg
         QColor selBg = bgColor.darker(110);
         painter->fillRect(rect, selBg);
         painter->setPen(QPen(priorityColor, 1.5));
@@ -92,28 +193,28 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
         painter->fillRect(rect, bgColor);
     }
 
-    // Priority color bar on the left
-    QRect colorBar(rect.left(), rect.top(), 4, rect.height());
-    painter->fillRect(colorBar, priorityColor);
+    // Left color bar
+    painter->fillRect(QRect(rect.left(), rect.top(), 4, rect.height()), priorityColor);
 
-    // Title — with ✅ prefix if completed
+    // Status badge
+    drawStatusBadge(painter, rect, workStatus, option.font);
+
+    // Title (single line, elided)
     QString title = index.data(TaskListModel::TitleRole).toString();
-    bool isCompleted = index.data(TaskListModel::CompletedRole).toBool();
-    if (isCompleted) {
-        title = QString::fromUtf8("\xE2\x9C\x85 ") + title;   // ✅
-    }
     QFont titleFont = option.font;
     titleFont.setPointSize(11);
     titleFont.setBold(true);
     painter->setFont(titleFont);
     painter->setPen(QColor("#2c3e50"));
-    QRect titleRect(rect.left() + 12, rect.top() + 8, rect.width() - 20, 20);
+    QRect prioBadge2 = priorityBadgeRect(option, index);
+    int titleRight = prioBadge2.left() - 4;
+    QRect titleRect(rect.left() + 28, rect.top() + 8, titleRight - rect.left() - 28, 20);
     painter->drawText(titleRect, Qt::AlignLeft | Qt::AlignVCenter,
                       painter->fontMetrics().elidedText(title, Qt::ElideRight, titleRect.width()));
 
     // Priority badge
     QString priorityText = index.data(TaskListModel::PriorityTextRole).toString();
-    QRect badgeRect = priorityBadgeRect(option, index);
+    QRect badgeRect = prioBadge2;
     QFont badgeFont = option.font;
     badgeFont.setPointSize(8);
     painter->setFont(badgeFont);
@@ -123,7 +224,7 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
     painter->setPen(Qt::white);
     painter->drawText(badgeRect, Qt::AlignCenter, priorityText);
 
-    // Content preview (first 2 lines)
+    // Content preview
     QString content = index.data(TaskListModel::ContentRole).toString();
     content.remove(QRegularExpression("<[^>]*>"));
     content = content.trimmed();
@@ -138,7 +239,7 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
                                                             contentRect.width() * 2));
     }
 
-    // Created & Modified dates
+    // Dates
     QDateTime createdAt = index.data(TaskListModel::CreatedAtRole).toDateTime();
     QDateTime updatedAt = index.data(TaskListModel::UpdatedAtRole).toDateTime();
     QFont dateFont = option.font;
@@ -170,19 +271,16 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
         double progress = (totalDays > 0) ? (static_cast<double>(elapsedDays) / totalDays) : 1.0;
         double clampedProgress = std::clamp(progress, 0.0, 1.0);
 
-        // Progress bar geometry
         int barY = rect.bottom() - 20;
         int barH = 12;
         int barX = rect.left() + 12;
         int barW = rect.width() - 70;
         QRect trackRect(barX, barY, barW, barH);
 
-        // Background track — priority-coordinated
         painter->setBrush(barTrackColor);
         painter->setPen(Qt::NoPen);
         painter->drawRoundedRect(trackRect, 6, 6);
 
-        // Fill bar — priority-coordinated (same color regardless of progress)
         int fillW = static_cast<int>(barW * clampedProgress);
         if (fillW > 0) {
             QRect fillRect(barX, barY, fillW, barH);
@@ -190,34 +288,23 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
             painter->drawRoundedRect(fillRect, 6, 6);
         }
 
-        // Emoji icon with urgency suffix
+        // Emoji icon
         QString icon = index.data(TaskListModel::DueDateIconRole).toString();
-        QString urgencySuffix;
-        if (progress > 1.0) {
-            urgencySuffix = QString::fromUtf8("\xF0\x9F\x94\xA5");   // 🔥 overdue
-        } else if (progress > 0.8) {
-            urgencySuffix = QString::fromUtf8("\xF0\x9F\x94\xA5");   // 🔥 urgent
-        } else if (progress > 0.5) {
-            urgencySuffix = QString::fromUtf8("\xF0\x9F\x92\xA8");   // 💨 rushing
-        }
-
         QFont iconFont = option.font;
         iconFont.setPointSize(9);
         painter->setFont(iconFont);
         painter->setPen(QColor("#2c3e50"));
         int iconX = barX + static_cast<int>(barW * clampedProgress) - 6;
         iconX = std::clamp(iconX, barX, barX + barW - 12);
-        QString iconStr = icon + urgencySuffix;
-        int iconW = urgencySuffix.isEmpty() ? 16 : 28;
-        painter->drawText(QRect(iconX, barY - 2, iconW, 16), Qt::AlignLeft | Qt::AlignVCenter, iconStr);
+        painter->drawText(QRect(iconX, barY - 2, 16, 16), Qt::AlignCenter, icon);
 
-        // Due date text — priority-coordinated color
+        // Due date text
         QFont dueFont = option.font;
         dueFont.setPointSize(8);
         dueFont.setBold(true);
         painter->setFont(dueFont);
         if (progress > 1.0) {
-            painter->setPen(priorityColor);  // Overdue uses the strong priority color
+            painter->setPen(priorityColor);
         } else {
             painter->setPen(barFillColor.darker(120));
         }
@@ -233,10 +320,17 @@ QSize TaskCardDelegate::sizeHint(const QStyleOptionViewItem &option,
                                   const QModelIndex &index) const
 {
     Q_UNUSED(option);
+    TaskWorkStatus ws = static_cast<TaskWorkStatus>(
+        index.data(TaskListModel::WorkStatusRole).toInt());
     QDateTime dueDate = index.data(TaskListModel::DueDateRole).toDateTime();
-    int baseHeight = dueDate.isValid() ? 108 : 88;
 
-    // Add separator space if priority changes
+    int baseHeight;
+    if (ws == TaskWorkStatus::Completed) {
+        baseHeight = 88;  // Completed: compact, no progress bar
+    } else {
+        baseHeight = dueDate.isValid() ? 108 : 88;
+    }
+
     if (index.row() > 0) {
         int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
         int curPriority = index.data(TaskListModel::PriorityRole).toInt();

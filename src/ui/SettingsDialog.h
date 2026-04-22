@@ -4,6 +4,7 @@
 #include <QLineEdit>
 #include <QComboBox>
 #include <QCheckBox>
+#include <QFileInfo>
 
 class SettingsDialog : public QDialog
 {
@@ -14,10 +15,14 @@ public:
 
 private slots:
     void onSave();
+    void onBrowseDbPath();
 
 private:
     void setupUi();
     void loadSettings();
+
+    // Database settings
+    QLineEdit *m_dbPathEdit;
 
     // AI settings
     QLineEdit *m_aiEndpoint;
@@ -26,9 +31,6 @@ private:
 
     // Hotkey settings
     QLineEdit *m_hotkeyEdit;
-
-    // Database settings
-    QLineEdit *m_dbPathEdit;
 
     // Update settings
     QCheckBox *m_checkUpdates;

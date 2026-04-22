@@ -3,6 +3,8 @@
 #include <QSqlError>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFileInfo>
+#include <QFile>
 #include <QDebug>
 #include <QDateTime>
 #include <QVariant>
@@ -25,6 +27,7 @@ bool DatabaseManager::initialize(const QString &dbPath)
     }
 
     m_db.setDatabaseName(path);
+    m_dbPath = path;
 
     if (!m_db.open()) {
         qCritical() << "Failed to open database:" << m_db.lastError().text();
@@ -192,8 +195,31 @@ bool DatabaseManager::migrateDatabase()
         dbVersion = 3;
     }
 
+    // Migration v3 -> v4: add work_status column, migrate completed -> work_status
+    if (dbVersion < 4) {
+        query.exec("PRAGMA table_info(tasks)");
+        bool hasWorkStatus = false;
+        while (query.next()) {
+            if (query.value(1).toString() == "work_status") {
+                hasWorkStatus = true;
+                break;
+            }
+        }
+        if (!hasWorkStatus) {
+            if (!query.exec("ALTER TABLE tasks ADD COLUMN work_status INTEGER DEFAULT 0")) {
+                qWarning() << "Failed to add work_status column:" << query.lastError().text();
+                return false;
+            }
+            // Migrate: completed=1 -> work_status=3 (Completed)
+            query.exec("UPDATE tasks SET work_status = 3 WHERE completed = 1");
+            qInfo() << "Migration v4: added work_status column, migrated completed tasks";
+        }
+        setSetting("db_version", "4");
+        dbVersion = 4;
+    }
+
     // Future migrations go here:
-    // if (dbVersion < 4) { ... setSetting("db_version", "4"); dbVersion = 4; }
+    // if (dbVersion < 5) { ... setSetting("db_version", "5"); dbVersion = 5; }
 
     return true;
 }
@@ -298,7 +324,7 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
     QString statusStr = (status == TaskStatus::Active) ? "active" : "archived";
     query.prepare(
         "SELECT id, product_id, title, content, priority, status, sort_order, "
-        "created_at, updated_at, archived_at, due_date, completed, completed_at "
+        "created_at, updated_at, archived_at, due_date, work_status "
         "FROM tasks WHERE product_id = ? AND status = ? "
         "ORDER BY priority ASC, CASE WHEN due_date IS NOT NULL THEN 0 ELSE 1 END, due_date ASC, sort_order ASC, id DESC");
     query.addBindValue(productId);
@@ -318,8 +344,7 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
         t.updatedAt = query.value(8).toDateTime();
         t.archivedAt = query.value(9).toDateTime();
         t.dueDate = query.value(10).toDateTime();
-        t.completed = query.value(11).toBool();
-        t.completedAt = query.value(12).toDateTime();
+        t.workStatus = static_cast<TaskWorkStatus>(query.value(11).toInt());
         tasks.append(t);
     }
     return tasks;
@@ -331,7 +356,7 @@ Task DatabaseManager::getTask(int id)
     QSqlQuery query(m_db);
     query.prepare(
         "SELECT id, product_id, title, content, priority, status, sort_order, "
-        "created_at, updated_at, archived_at, due_date, completed, completed_at "
+        "created_at, updated_at, archived_at, due_date, work_status "
         "FROM tasks WHERE id = ?");
     query.addBindValue(id);
     if (query.exec() && query.next()) {
@@ -346,8 +371,7 @@ Task DatabaseManager::getTask(int id)
         t.updatedAt = query.value(8).toDateTime();
         t.archivedAt = query.value(9).toDateTime();
         t.dueDate = query.value(10).toDateTime();
-        t.completed = query.value(11).toBool();
-        t.completedAt = query.value(12).toDateTime();
+        t.workStatus = static_cast<TaskWorkStatus>(query.value(11).toInt());
     }
     return t;
 }
@@ -460,22 +484,11 @@ bool DatabaseManager::archiveTask(int taskId)
     return false;
 }
 
-bool DatabaseManager::completeTask(int taskId)
+bool DatabaseManager::updateTaskWorkStatus(int taskId, TaskWorkStatus workStatus)
 {
     QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET completed = 1, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(taskId);
-    if (query.exec()) {
-        emit taskUpdated(taskId);
-        return true;
-    }
-    return false;
-}
-
-bool DatabaseManager::uncompleteTask(int taskId)
-{
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET completed = 0, completed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.prepare("UPDATE tasks SET work_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(static_cast<int>(workStatus));
     query.addBindValue(taskId);
     if (query.exec()) {
         emit taskUpdated(taskId);
@@ -578,7 +591,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
     if (productId > 0) {
         sql = "SELECT t.id, t.product_id, t.title, t.content, t.priority, t.status, "
               "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, "
-              "t.completed, t.completed_at "
+              "t.work_status "
               "FROM tasks t INNER JOIN tasks_fts f ON t.id = f.rowid "
               "WHERE tasks_fts MATCH ? AND t.product_id = ? "
               "ORDER BY rank";
@@ -588,7 +601,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
     } else {
         sql = "SELECT t.id, t.product_id, t.title, t.content, t.priority, t.status, "
               "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, "
-              "t.completed, t.completed_at "
+              "t.work_status "
               "FROM tasks t INNER JOIN tasks_fts f ON t.id = f.rowid "
               "WHERE tasks_fts MATCH ? "
               "ORDER BY rank";
@@ -603,7 +616,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         if (productId > 0) {
             q.prepare(
                 "SELECT id, product_id, title, content, priority, status, sort_order, "
-                "created_at, updated_at, archived_at, due_date, completed, completed_at FROM tasks "
+                "created_at, updated_at, archived_at, due_date, work_status FROM tasks "
                 "WHERE (title LIKE ? OR content LIKE ?) AND product_id = ?");
             q.addBindValue(likeQuery);
             q.addBindValue(likeQuery);
@@ -611,7 +624,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         } else {
             q.prepare(
                 "SELECT id, product_id, title, content, priority, status, sort_order, "
-                "created_at, updated_at, archived_at, due_date, completed, completed_at FROM tasks "
+                "created_at, updated_at, archived_at, due_date, work_status FROM tasks "
                 "WHERE title LIKE ? OR content LIKE ?");
             q.addBindValue(likeQuery);
             q.addBindValue(likeQuery);
@@ -632,11 +645,114 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         t.updatedAt = q.value(8).toDateTime();
         t.archivedAt = q.value(9).toDateTime();
         t.dueDate = q.value(10).toDateTime();
-        t.completed = q.value(11).toBool();
-        t.completedAt = q.value(12).toDateTime();
+        t.workStatus = static_cast<TaskWorkStatus>(q.value(11).toInt());
         tasks.append(t);
     }
     return tasks;
+}
+
+// --- Database Path & Backup ---
+
+QString DatabaseManager::currentDbPath() const
+{
+    return m_dbPath;
+}
+
+bool DatabaseManager::moveDatabase(const QString &newPath)
+{
+    if (newPath == m_dbPath)
+        return true;
+
+    // Close current connection
+    m_db.close();
+
+    // Copy the file to new location
+    QDir().mkpath(QFileInfo(newPath).absolutePath());
+    if (QFile::exists(newPath)) {
+        QFile::remove(newPath);
+    }
+
+    bool copied = QFile::copy(m_dbPath, newPath);
+    if (!copied) {
+        qWarning() << "Failed to copy database to" << newPath;
+        // Reopen at old path
+        m_db.setDatabaseName(m_dbPath);
+        m_db.open();
+        return false;
+    }
+
+    // Also copy WAL and SHM files if they exist
+    for (const QString &suffix : {"-wal", "-shm"}) {
+        QString src = m_dbPath + suffix;
+        QString dst = newPath + suffix;
+        if (QFile::exists(src)) {
+            QFile::remove(dst);
+            QFile::copy(src, dst);
+        }
+    }
+
+    // Open at new path
+    m_db.setDatabaseName(newPath);
+    if (!m_db.open()) {
+        qWarning() << "Failed to open database at new path:" << newPath;
+        m_db.setDatabaseName(m_dbPath);
+        m_db.open();
+        return false;
+    }
+
+    // Remove old files
+    QString oldPath = m_dbPath;
+    m_dbPath = newPath;
+    QFile::remove(oldPath);
+    QFile::remove(oldPath + "-wal");
+    QFile::remove(oldPath + "-shm");
+
+    qInfo() << "Database moved to:" << newPath;
+    return true;
+}
+
+bool DatabaseManager::backupDatabase()
+{
+    QString today = QDate::currentDate().toString("yyyyMMdd");
+    QString backupDir = QFileInfo(m_dbPath).absolutePath() + "/backups";
+    QDir().mkpath(backupDir);
+
+    QString backupPath = backupDir + "/nexus_" + today + ".db";
+
+    // Skip if today's backup already exists
+    if (QFile::exists(backupPath))
+        return true;
+
+    // Use SQLite VACUUM INTO for a consistent backup
+    QSqlQuery query(m_db);
+    if (query.exec(QString("VACUUM INTO '%1'").arg(backupPath))) {
+        qInfo() << "Database backed up to:" << backupPath;
+        cleanupOldBackups();
+        return true;
+    }
+
+    // Fallback: simple file copy
+    bool ok = QFile::copy(m_dbPath, backupPath);
+    if (ok) {
+        qInfo() << "Database backed up (copy) to:" << backupPath;
+        cleanupOldBackups();
+    } else {
+        qWarning() << "Database backup failed";
+    }
+    return ok;
+}
+
+void DatabaseManager::cleanupOldBackups(int maxBackups)
+{
+    QString backupDir = QFileInfo(m_dbPath).absolutePath() + "/backups";
+    QDir dir(backupDir);
+    QStringList backups = dir.entryList({"nexus_*.db"}, QDir::Files, QDir::Name);
+
+    while (backups.size() > maxBackups) {
+        QString oldest = backups.takeFirst();
+        QFile::remove(backupDir + "/" + oldest);
+        qInfo() << "Removed old backup:" << oldest;
+    }
 }
 
 // --- Settings ---

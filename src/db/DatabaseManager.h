@@ -15,6 +15,12 @@ public:
 
     bool initialize(const QString &dbPath = QString());
 
+    // Database path and backup
+    QString currentDbPath() const;
+    bool moveDatabase(const QString &newPath);
+    bool backupDatabase();
+    void cleanupOldBackups(int maxBackups = 10);
+
     // Product CRUD
     QList<Product> getAllProducts();
     Product getProduct(int id);
@@ -34,8 +40,7 @@ public:
     bool updateTaskDueDate(int taskId, const QDateTime &dueDate);
     bool archiveTask(int taskId);
     bool reactivateTask(int taskId);
-    bool completeTask(int taskId);
-    bool uncompleteTask(int taskId);
+    bool updateTaskWorkStatus(int taskId, TaskWorkStatus workStatus);
     bool deleteTask(int taskId);
     bool reorderTasks(const QList<int> &taskIds);
 
@@ -74,4 +79,5 @@ private:
     void removeFtsEntry(int taskId);
 
     QSqlDatabase m_db;
+    QString m_dbPath;
 };
