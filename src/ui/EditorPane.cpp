@@ -5,6 +5,7 @@
 #include <QUrl>
 #include <QDesktopServices>
 #include <QWebEnginePage>
+#include <QRegularExpression>
 
 // Custom page that intercepts link clicks and opens them externally
 class EditorWebPage : public QWebEnginePage
@@ -65,6 +66,16 @@ void EditorPane::setupUi()
             this, &EditorPane::onEditorReady);
     connect(m_bridge, &EditorBridge::imageInsertRequested,
             this, &EditorPane::onImageInsertRequested);
+    connect(m_bridge, &EditorBridge::generateTitleRequested, this, [this]() {
+        if (m_currentTaskId > 0) {
+            emit generateTitleRequested(m_currentTaskId, m_bridge->content());
+        }
+    });
+    connect(m_bridge, &EditorBridge::summarizeRequested, this, [this]() {
+        if (m_currentTaskId > 0) {
+            emit summarizeRequested(m_currentTaskId, m_bridge->content());
+        }
+    });
 }
 
 void EditorPane::loadTask(int taskId)
@@ -166,6 +177,20 @@ void EditorPane::onAutoSave()
     DatabaseManager::instance().saveContentSnapshot(m_currentTaskId, content);
 
     emit contentChanged(m_currentTaskId, content);
+
+    // Auto-generate title if empty
+    if (!m_titleGenerationPending) {
+        Task task = DatabaseManager::instance().getTask(m_currentTaskId);
+        if (task.title.trimmed().isEmpty()) {
+            QString plain = content;
+            plain.remove(QRegularExpression("<[^>]*>"));
+            plain = plain.trimmed();
+            if (!plain.isEmpty()) {
+                m_titleGenerationPending = true;
+                emit autoGenerateTitleRequested(m_currentTaskId, content);
+            }
+        }
+    }
 }
 
 void EditorPane::onImageInsertRequested()

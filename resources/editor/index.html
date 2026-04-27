@@ -19,6 +19,7 @@
             <button class="ribbon-tab active" onclick="switchTab('home')">Home</button>
             <button class="ribbon-tab" onclick="switchTab('insert')">Insert</button>
             <button class="ribbon-tab" onclick="switchTab('view')">View</button>
+            <button class="ribbon-tab" onclick="switchTab('ai')">AI</button>
         </div>
 
         <!-- Home Tab -->
@@ -200,6 +201,23 @@
                     </button>
                 </div>
                 <span class="ribbon-group-label">Page Setup</span>
+            </div>
+        </div>
+
+        <!-- AI Tab -->
+        <div id="tab-ai" class="ribbon-panel">
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="requestGenerateTitle()" title="AI Generate Title">
+                        <span class="ribbon-icon">&#x1F4DD;</span>
+                        <span class="ribbon-label">AI Title</span>
+                    </button>
+                    <button class="ribbon-btn ribbon-btn-lg" onclick="requestSummarize()" title="AI Summarize Content">
+                        <span class="ribbon-icon">&#x2728;</span>
+                        <span class="ribbon-label">Summarize</span>
+                    </button>
+                </div>
+                <span class="ribbon-group-label">AI Assistant</span>
             </div>
         </div>
     </div>

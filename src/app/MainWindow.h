@@ -31,6 +31,8 @@ private slots:
     void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
     void onGenerateTitleRequested(int taskId, const QString &content);
     void onTitleGenerated(const QString &title);
+    void onSummarizeRequested(int taskId, const QString &content);
+    void onSummaryGenerated(const QString &summary);
     void onAIError(const QString &message);
     void showSettings();
     void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl, const QString &releaseNotes);
@@ -57,4 +59,5 @@ private:
 
     // State
     int m_currentTaskIdForTitle = -1;
+    int m_currentTaskIdForSummary = -1;
 };

@@ -32,7 +32,7 @@ public:
     // Task CRUD
     QList<Task> getTasksForProduct(int productId, TaskStatus status = TaskStatus::Active);
     Task getTask(int id);
-    int addTask(int productId, const QString &title, const QDateTime &dueDate = QDateTime());
+    int addTask(int productId, const QString &title, TaskPriority priority = TaskPriority::Medium, const QDateTime &dueDate = QDateTime());
     bool updateTask(const Task &task);
     bool updateTaskTitle(int taskId, const QString &title);
     bool updateTaskContent(int taskId, const QString &content);

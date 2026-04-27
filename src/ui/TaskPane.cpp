@@ -3,6 +3,10 @@
 #include "db/DatabaseManager.h"
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGraphicsDropShadowEffect>
 #include <QMenu>
 #include <QAction>
 #include <QHBoxLayout>
@@ -10,6 +14,8 @@
 #include <QDialogButtonBox>
 #include <QDateTimeEdit>
 #include <QFormLayout>
+#include <QLineEdit>
+#include <QCheckBox>
 
 TaskPane::TaskPane(QWidget *parent)
     : QWidget(parent)
@@ -326,26 +332,112 @@ void TaskPane::onAddTask()
         return;
     }
 
-    bool ok;
-    QString title = QInputDialog::getText(this, "New Task", "Task title:",
-                                           QLineEdit::Normal, "New Task", &ok);
-    if (ok && !title.trimmed().isEmpty()) {
-        QDateTime dueDate;
-        auto result = QMessageBox::question(this, "Due Date",
-            "Set a due date for this task?",
-            QMessageBox::Yes | QMessageBox::No);
-        if (result == QMessageBox::Yes) {
-            dueDate = showDueDateDialog();
-        }
+    // Priority picker dialog
+    QDialog dialog(this);
+    dialog.setWindowTitle("New Task — Select Priority");
+    dialog.setFixedSize(360, 120);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(16, 16, 16, 16);
 
-        m_model->addTask(m_currentProductId, title.trimmed(), dueDate);
-        // Select the newly added task
-        int lastRow = m_model->rowCount() - 1;
-        if (lastRow >= 0) {
-            QModelIndex idx = m_model->index(lastRow);
-            m_listView->setCurrentIndex(idx);
-            emit taskSelected(m_model->taskIdAt(lastRow));
-        }
+    auto *btnLayout = new QHBoxLayout;
+    btnLayout->setSpacing(10);
+
+    TaskPriority selectedPriority = TaskPriority::Medium;
+    bool accepted = false;
+
+    struct PrioInfo { TaskPriority p; QString label; };
+    PrioInfo prios[] = {
+        { TaskPriority::Critical, "P0 Critical" },
+        { TaskPriority::High,     "P1 High" },
+        { TaskPriority::Medium,   "P2 Medium" },
+        { TaskPriority::Low,      "P3 Low" }
+    };
+
+    for (auto &info : prios) {
+        auto *btn = new QPushButton(info.label, &dialog);
+        QColor bg = Task::priorityColor(info.p);
+        QColor bgLight = Task::priorityBackgroundColor(info.p);
+        btn->setFixedHeight(50);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setStyleSheet(QString(
+            "QPushButton {"
+            "  background: %1; color: white; border: none; border-radius: 8px;"
+            "  font-size: 13px; font-weight: bold; padding: 8px 4px;"
+            "}"
+            "QPushButton:hover {"
+            "  background: %2;"
+            "}"
+        ).arg(bg.name(), bg.darker(115).name()));
+
+        TaskPriority cap = info.p;
+        connect(btn, &QPushButton::clicked, &dialog, [&selectedPriority, &accepted, &dialog, cap]() {
+            selectedPriority = cap;
+            accepted = true;
+            dialog.accept();
+        });
+        btnLayout->addWidget(btn);
+    }
+
+    layout->addLayout(btnLayout);
+    dialog.exec();
+
+    if (!accepted) return;
+
+    // Task details dialog (title + optional due date)
+    QDialog detailsDlg(this);
+    detailsDlg.setWindowTitle("New Task — Details");
+    detailsDlg.setFixedWidth(400);
+    detailsDlg.setStyleSheet(
+        "QDialog { background-color: #2c3e50; }"
+        "QLabel { color: white; }"
+        "QLineEdit { background-color: #3d566e; color: white; border: 1px solid #5a7a96; "
+        "padding: 6px; font-size: 12px; }"
+        "QDateTimeEdit { background-color: #3d566e; color: white; border: 1px solid #5a7a96; "
+        "padding: 6px; font-size: 12px; }"
+        "QCheckBox { color: white; }"
+        "QPushButton { background-color: #2980b9; color: white; border: none; padding: 6px 16px; }"
+        "QPushButton:hover { background-color: #3498db; }");
+
+    auto *formLayout = new QFormLayout(&detailsDlg);
+    formLayout->setContentsMargins(16, 16, 16, 16);
+
+    auto *titleEdit = new QLineEdit(&detailsDlg);
+    titleEdit->setPlaceholderText("Enter task title...");
+    formLayout->addRow("Title:", titleEdit);
+
+    auto *dueDateCheck = new QCheckBox("Set due date", &detailsDlg);
+    formLayout->addRow(dueDateCheck);
+
+    auto *dueDateEdit = new QDateTimeEdit(&detailsDlg);
+    dueDateEdit->setCalendarPopup(true);
+    dueDateEdit->setDisplayFormat("yyyy-MM-dd hh:mm");
+    dueDateEdit->setDateTime(QDateTime::currentDateTime().addDays(7));
+    dueDateEdit->setMinimumDateTime(QDateTime::currentDateTime());
+    dueDateEdit->setEnabled(false);
+    formLayout->addRow("Due Date:", dueDateEdit);
+
+    connect(dueDateCheck, &QCheckBox::toggled, dueDateEdit, &QDateTimeEdit::setEnabled);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &detailsDlg);
+    formLayout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &detailsDlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &detailsDlg, &QDialog::reject);
+
+    if (detailsDlg.exec() != QDialog::Accepted) return;
+
+    QString title = titleEdit->text().trimmed();
+    QDateTime dueDate;
+    if (dueDateCheck->isChecked()) {
+        dueDate = dueDateEdit->dateTime();
+    }
+
+    int newId = m_model->addTask(m_currentProductId, title, selectedPriority, dueDate);
+    // Select the newly added task
+    int row = m_model->rowForTaskId(newId);
+    if (row >= 0) {
+        QModelIndex idx = m_model->index(row);
+        m_listView->setCurrentIndex(idx);
+        emit taskSelected(newId);
     }
 }
 

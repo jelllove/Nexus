@@ -371,6 +371,16 @@ function toggleRuleLines() {
     document.body.classList.toggle('rule-lines');
 }
 
+// ---- AI Functions ----
+
+function requestGenerateTitle() {
+    if (bridge) bridge.requestGenerateTitle();
+}
+
+function requestSummarize() {
+    if (bridge) bridge.requestSummarize();
+}
+
 // ---- Page Title & Timestamp ----
 
 window.setPageTitle = function(title) {

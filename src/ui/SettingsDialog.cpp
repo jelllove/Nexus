@@ -1,5 +1,7 @@
 #include "SettingsDialog.h"
 #include "db/DatabaseManager.h"
+#include "services/AIService.h"
+#include <memory>
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -48,21 +50,30 @@ void SettingsDialog::setupUi()
     auto *aiLayout = new QFormLayout(aiGroup);
 
     m_aiEndpoint = new QLineEdit(this);
-    m_aiEndpoint->setPlaceholderText("https://api.openai.com/v1/chat/completions");
+    m_aiEndpoint->setPlaceholderText("https://{resource}.openai.azure.com/openai/deployments/{deploy}/chat/completions");
     aiLayout->addRow("API Endpoint:", m_aiEndpoint);
 
     m_aiApiKey = new QLineEdit(this);
     m_aiApiKey->setEchoMode(QLineEdit::Password);
-    m_aiApiKey->setPlaceholderText("sk-...");
+    m_aiApiKey->setPlaceholderText("your-api-key");
     aiLayout->addRow("API Key:", m_aiApiKey);
 
     m_aiModel = new QLineEdit(this);
     m_aiModel->setPlaceholderText("gpt-4o-mini");
     aiLayout->addRow("Model:", m_aiModel);
 
-    QLabel *aiNote = new QLabel("Supports OpenAI-compatible endpoints (OpenAI, Azure, local LLMs)", this);
+    QLabel *aiNote = new QLabel("Supports Azure OpenAI and OpenAI-compatible endpoints. "
+                                "Azure endpoints auto-detected by URL.", this);
     aiNote->setStyleSheet("color: #7f8c8d; font-size: 11px;");
     aiLayout->addRow(aiNote);
+
+    m_verifyBtn = new QPushButton("Verify Connection", this);
+    m_verifyBtn->setStyleSheet(
+        "QPushButton { background-color: #27ae60; color: white; border: none; padding: 6px 16px; }"
+        "QPushButton:hover { background-color: #2ecc71; }"
+        "QPushButton:disabled { background-color: #95a5a6; }");
+    aiLayout->addRow(m_verifyBtn);
+    connect(m_verifyBtn, &QPushButton::clicked, this, &SettingsDialog::onVerifyAI);
 
     mainLayout->addWidget(aiGroup);
 
@@ -145,4 +156,34 @@ void SettingsDialog::onBrowseDbPath()
     if (!path.isEmpty()) {
         m_dbPathEdit->setText(path);
     }
+}
+
+void SettingsDialog::onVerifyAI()
+{
+    QString endpoint = m_aiEndpoint->text().trimmed();
+    QString apiKey = m_aiApiKey->text().trimmed();
+    QString model = m_aiModel->text().trimmed();
+
+    if (endpoint.isEmpty() || apiKey.isEmpty()) {
+        QMessageBox::warning(this, "Verify", "Please enter both endpoint and API key.");
+        return;
+    }
+
+    m_verifyBtn->setEnabled(false);
+    m_verifyBtn->setText("Verifying...");
+
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(&AIService::instance(), &AIService::verifyResult,
+                    this, [this, conn](bool success, const QString &message) {
+        disconnect(*conn);
+        m_verifyBtn->setEnabled(true);
+        m_verifyBtn->setText("Verify Connection");
+        if (success) {
+            QMessageBox::information(this, "Verify", message);
+        } else {
+            QMessageBox::warning(this, "Verify", message);
+        }
+    });
+
+    AIService::instance().verifyConnection(endpoint, apiKey, model);
 }

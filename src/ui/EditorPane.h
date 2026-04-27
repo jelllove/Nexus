@@ -18,11 +18,14 @@ public:
 
     void loadTask(int taskId);
     void clear();
+    void resetTitleGenerationPending() { m_titleGenerationPending = false; }
 
 signals:
     void contentChanged(int taskId, const QString &content);
     void titleChanged(int taskId, const QString &title);
     void generateTitleRequested(int taskId, const QString &content);
+    void summarizeRequested(int taskId, const QString &content);
+    void autoGenerateTitleRequested(int taskId, const QString &content);
 
 private slots:
     void onEditorContentChanged(const QString &content);
@@ -43,4 +46,5 @@ private:
     QString m_pendingContent;
     QString m_pendingTitle;
     QString m_pendingTimestamp;
+    bool m_titleGenerationPending = false;
 };

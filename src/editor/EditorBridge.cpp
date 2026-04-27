@@ -35,3 +35,13 @@ void EditorBridge::openExternalUrl(const QString &url)
 {
     QDesktopServices::openUrl(QUrl(url));
 }
+
+void EditorBridge::requestGenerateTitle()
+{
+    emit generateTitleRequested();
+}
+
+void EditorBridge::requestSummarize()
+{
+    emit summarizeRequested();
+}

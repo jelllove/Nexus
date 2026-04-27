@@ -87,12 +87,13 @@ Task TaskListModel::taskAt(int row) const
     return m_tasks[row];
 }
 
-void TaskListModel::addTask(int productId, const QString &title, const QDateTime &dueDate)
+int TaskListModel::addTask(int productId, const QString &title, TaskPriority priority, const QDateTime &dueDate)
 {
-    int id = DatabaseManager::instance().addTask(productId, title, dueDate);
+    int id = DatabaseManager::instance().addTask(productId, title, priority, dueDate);
     if (id > 0) {
         refresh();
     }
+    return id;
 }
 
 void TaskListModel::removeTask(int row)

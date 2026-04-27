@@ -376,18 +376,20 @@ Task DatabaseManager::getTask(int id)
     return t;
 }
 
-int DatabaseManager::addTask(int productId, const QString &title, const QDateTime &dueDate)
+int DatabaseManager::addTask(int productId, const QString &title, TaskPriority priority, const QDateTime &dueDate)
 {
     QSqlQuery query(m_db);
     if (dueDate.isValid()) {
-        query.prepare("INSERT INTO tasks (product_id, title, due_date) VALUES (?, ?, ?)");
+        query.prepare("INSERT INTO tasks (product_id, title, priority, due_date) VALUES (?, ?, ?, ?)");
         query.addBindValue(productId);
         query.addBindValue(title);
+        query.addBindValue(static_cast<int>(priority));
         query.addBindValue(dueDate.toString(Qt::ISODate));
     } else {
-        query.prepare("INSERT INTO tasks (product_id, title) VALUES (?, ?)");
+        query.prepare("INSERT INTO tasks (product_id, title, priority) VALUES (?, ?, ?)");
         query.addBindValue(productId);
         query.addBindValue(title);
+        query.addBindValue(static_cast<int>(priority));
     }
     if (query.exec()) {
         int id = query.lastInsertId().toInt();

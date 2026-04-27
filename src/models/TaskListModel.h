@@ -35,7 +35,7 @@ public:
     int taskIdAt(int row) const;
     int rowForTaskId(int taskId) const;
     Task taskAt(int row) const;
-    void addTask(int productId, const QString &title, const QDateTime &dueDate = QDateTime());
+    int addTask(int productId, const QString &title, TaskPriority priority = TaskPriority::Medium, const QDateTime &dueDate = QDateTime());
     void removeTask(int row);
     void refresh();
 

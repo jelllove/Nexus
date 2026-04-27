@@ -2,6 +2,7 @@
 
 #include <QDialog>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QComboBox>
 #include <QCheckBox>
 #include <QFileInfo>
@@ -16,6 +17,7 @@ public:
 private slots:
     void onSave();
     void onBrowseDbPath();
+    void onVerifyAI();
 
 private:
     void setupUi();
@@ -28,6 +30,7 @@ private:
     QLineEdit *m_aiEndpoint;
     QLineEdit *m_aiApiKey;
     QLineEdit *m_aiModel;
+    QPushButton *m_verifyBtn;
 
     // Hotkey settings
     QLineEdit *m_hotkeyEdit;

@@ -33,6 +33,8 @@ MainWindow::MainWindow(QWidget *parent)
     // Connect AI service
     connect(&AIService::instance(), &AIService::titleGenerated,
             this, &MainWindow::onTitleGenerated);
+    connect(&AIService::instance(), &AIService::summaryGenerated,
+            this, &MainWindow::onSummaryGenerated);
     connect(&AIService::instance(), &AIService::error,
             this, &MainWindow::onAIError);
 
@@ -95,8 +97,12 @@ void MainWindow::setupUi()
             this, &MainWindow::onSearchCleared);
     connect(m_editorPane, &EditorPane::generateTitleRequested,
             this, &MainWindow::onGenerateTitleRequested);
+    connect(m_editorPane, &EditorPane::summarizeRequested,
+            this, &MainWindow::onSummarizeRequested);
     connect(m_editorPane, &EditorPane::titleChanged,
             this, &MainWindow::onTaskTitleChanged);
+    connect(m_editorPane, &EditorPane::autoGenerateTitleRequested,
+            this, &MainWindow::onGenerateTitleRequested);
 }
 
 void MainWindow::setupMenuBar()
@@ -301,13 +307,41 @@ void MainWindow::onTitleGenerated(const QString &title)
         // Reload editor to show new title
         m_editorPane->loadTask(m_currentTaskIdForTitle);
     }
+    m_editorPane->resetTitleGenerationPending();
     m_currentTaskIdForTitle = -1;
 }
 
 void MainWindow::onAIError(const QString &message)
 {
     statusBar()->showMessage("AI Error: " + message, 5000);
+    QMessageBox::warning(this, "AI Error", message);
+    m_editorPane->resetTitleGenerationPending();
     m_currentTaskIdForTitle = -1;
+    m_currentTaskIdForSummary = -1;
+}
+
+void MainWindow::onSummarizeRequested(int taskId, const QString &content)
+{
+    m_currentTaskIdForSummary = taskId;
+    statusBar()->showMessage("Summarizing content with AI...");
+    AIService::instance().summarizeContent(content);
+}
+
+void MainWindow::onSummaryGenerated(const QString &summary)
+{
+    if (m_currentTaskIdForSummary > 0) {
+        // Append summary to existing content as a styled block
+        Task task = DatabaseManager::instance().getTask(m_currentTaskIdForSummary);
+        QString summaryHtml = QString(
+            "<hr><blockquote><p><strong>AI Summary</strong></p><p>%1</p></blockquote>"
+        ).arg(summary.toHtmlEscaped().replace("\n", "</p><p>"));
+
+        QString newContent = task.content + summaryHtml;
+        DatabaseManager::instance().updateTaskContent(m_currentTaskIdForSummary, newContent);
+        m_editorPane->loadTask(m_currentTaskIdForSummary);
+        statusBar()->showMessage("Summary added.", 5000);
+    }
+    m_currentTaskIdForSummary = -1;
 }
 
 void MainWindow::showSettings()

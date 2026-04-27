@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QNetworkRequest>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QRegularExpression>
 
 AIService::AIService()
@@ -19,7 +20,35 @@ AIService& AIService::instance()
     return inst;
 }
 
-void AIService::generateTitle(const QString &content)
+QNetworkRequest AIService::buildRequest(const QString &endpoint, const QString &apiKey)
+{
+    QUrl url(endpoint);
+    QNetworkRequest request;
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    // Auto-detect Azure OpenAI: endpoint contains ".openai.azure.com"
+    if (endpoint.contains(".openai.azure.com", Qt::CaseInsensitive)) {
+        // Azure OpenAI uses api-key header
+        // Ensure api-version query param exists
+        if (!endpoint.contains("api-version")) {
+            QUrlQuery query(url);
+            query.addQueryItem("api-version", "2024-02-01");
+            url.setQuery(query);
+        }
+        request.setUrl(url);
+        request.setRawHeader("api-key", apiKey.toUtf8());
+    } else {
+        // Standard OpenAI-compatible: Bearer token
+        request.setUrl(url);
+        request.setRawHeader("Authorization", QString("Bearer %1").arg(apiKey).toUtf8());
+    }
+
+    return request;
+}
+
+void AIService::sendChatRequest(const QString &systemPrompt, const QString &userPrompt,
+                                 int maxTokens, double temperature,
+                                 std::function<void(const QString &)> onSuccess)
 {
     auto &db = DatabaseManager::instance();
     QString endpoint = db.getSetting("ai_endpoint");
@@ -31,46 +60,31 @@ void AIService::generateTitle(const QString &content)
         return;
     }
 
-    // Strip HTML for the prompt
-    QString plainContent = content;
-    plainContent.remove(QRegularExpression("<[^>]*>"));
-    plainContent = plainContent.trimmed();
-
-    if (plainContent.isEmpty()) {
-        emit error("No content to generate title from.");
-        return;
-    }
-
-    // Truncate if too long
-    if (plainContent.length() > 2000) {
-        plainContent = plainContent.left(2000) + "...";
-    }
-
-    // Build OpenAI-compatible request
-    QJsonObject message;
-    message["role"] = "user";
-    message["content"] = QString(
-        "Generate a concise, descriptive title (max 80 characters) for the following task content. "
-        "Return ONLY the title text, nothing else.\n\n%1").arg(plainContent);
-
     QJsonArray messages;
-    messages.append(message);
+
+    if (!systemPrompt.isEmpty()) {
+        QJsonObject sysMsg;
+        sysMsg["role"] = "system";
+        sysMsg["content"] = systemPrompt;
+        messages.append(sysMsg);
+    }
+
+    QJsonObject userMsg;
+    userMsg["role"] = "user";
+    userMsg["content"] = userPrompt;
+    messages.append(userMsg);
 
     QJsonObject requestBody;
     requestBody["model"] = model;
     requestBody["messages"] = messages;
-    requestBody["max_tokens"] = 100;
-    requestBody["temperature"] = 0.3;
+    requestBody["max_tokens"] = maxTokens;
+    requestBody["temperature"] = temperature;
 
-    QUrl url(endpoint);
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setRawHeader("Authorization", QString("Bearer %1").arg(apiKey).toUtf8());
-
+    QNetworkRequest request = buildRequest(endpoint, apiKey);
     QByteArray postData = QJsonDocument(requestBody).toJson();
     QNetworkReply *reply = m_networkManager->post(request, postData);
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, onSuccess]() {
         reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
@@ -82,22 +96,120 @@ void AIService::generateTitle(const QString &content)
         QJsonDocument doc = QJsonDocument::fromJson(responseData);
         QJsonObject obj = doc.object();
 
-        // Parse OpenAI-compatible response
         QJsonArray choices = obj["choices"].toArray();
         if (!choices.isEmpty()) {
             QJsonObject firstChoice = choices[0].toObject();
             QJsonObject messageObj = firstChoice["message"].toObject();
-            QString title = messageObj["content"].toString().trimmed();
-            // Remove quotes if the AI wrapped the title in them
-            if (title.startsWith('"') && title.endsWith('"')) {
-                title = title.mid(1, title.length() - 2);
-            }
-            if (!title.isEmpty()) {
-                emit titleGenerated(title);
+            QString result = messageObj["content"].toString().trimmed();
+            if (!result.isEmpty()) {
+                onSuccess(result);
                 return;
             }
         }
 
         emit error("Failed to parse AI response.");
+    });
+}
+
+void AIService::generateTitle(const QString &content)
+{
+    QString plainContent = content;
+    plainContent.remove(QRegularExpression("<[^>]*>"));
+    plainContent = plainContent.trimmed();
+
+    if (plainContent.isEmpty()) {
+        emit error("No content to generate title from.");
+        return;
+    }
+
+    if (plainContent.length() > 2000) {
+        plainContent = plainContent.left(2000) + "...";
+    }
+
+    sendChatRequest(
+        QString(),
+        QString("Generate a concise, descriptive title (max 80 characters) for the following task content. "
+                "Return ONLY the title text, nothing else.\n\n%1").arg(plainContent),
+        100, 0.3,
+        [this](const QString &result) {
+            QString title = result;
+            if (title.startsWith('"') && title.endsWith('"')) {
+                title = title.mid(1, title.length() - 2);
+            }
+            emit titleGenerated(title);
+        }
+    );
+}
+
+void AIService::summarizeContent(const QString &content)
+{
+    QString plainContent = content;
+    plainContent.remove(QRegularExpression("<[^>]*>"));
+    plainContent = plainContent.trimmed();
+
+    if (plainContent.isEmpty()) {
+        emit error("No content to summarize.");
+        return;
+    }
+
+    if (plainContent.length() > 4000) {
+        plainContent = plainContent.left(4000) + "...";
+    }
+
+    sendChatRequest(
+        "You are a helpful assistant that summarizes task content concisely. "
+        "Output a clear, structured summary in the same language as the input. "
+        "Use bullet points if appropriate. Keep it under 200 words.",
+        plainContent,
+        500, 0.3,
+        [this](const QString &result) {
+            emit summaryGenerated(result);
+        }
+    );
+}
+
+void AIService::verifyConnection(const QString &endpoint, const QString &apiKey, const QString &model)
+{
+    if (endpoint.isEmpty() || apiKey.isEmpty()) {
+        emit verifyResult(false, "Endpoint or API key is empty.");
+        return;
+    }
+
+    QJsonArray messages;
+    QJsonObject userMsg;
+    userMsg["role"] = "user";
+    userMsg["content"] = "Hello";
+    messages.append(userMsg);
+
+    QJsonObject requestBody;
+    requestBody["model"] = model.isEmpty() ? "gpt-4o-mini" : model;
+    requestBody["messages"] = messages;
+    requestBody["max_tokens"] = 5;
+    requestBody["temperature"] = 0.0;
+
+    QNetworkRequest request = buildRequest(endpoint, apiKey);
+    QByteArray postData = QJsonDocument(requestBody).toJson();
+    QNetworkReply *reply = m_networkManager->post(request, postData);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            emit verifyResult(false, QString("Connection failed: %1").arg(reply->errorString()));
+            return;
+        }
+
+        QByteArray responseData = reply->readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(responseData);
+        QJsonObject obj = doc.object();
+
+        if (obj.contains("choices")) {
+            emit verifyResult(true, "Connection successful!");
+        } else if (obj.contains("error")) {
+            QString errMsg = obj["error"].toObject()["message"].toString();
+            emit verifyResult(false, QString("API error: %1").arg(errMsg));
+        } else {
+            emit verifyResult(false, "Unexpected response format.");
+        }
     });
 }
