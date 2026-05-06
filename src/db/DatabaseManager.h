@@ -42,6 +42,10 @@ public:
     bool reactivateTask(int taskId);
     bool updateTaskWorkStatus(int taskId, TaskWorkStatus workStatus);
     bool deleteTask(int taskId);
+    bool restoreTask(int taskId);
+    bool permanentlyDeleteTask(int taskId);
+    void purgeOldDeletedTasks(int maxAgeDays = 30);
+    QList<Task> getDeletedTasks();
     bool reorderTasks(const QList<int> &taskIds);
 
     // Content history (undo/redo)

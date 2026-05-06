@@ -29,6 +29,20 @@ QRect TaskCardDelegate::priorityBadgeRect(const QStyleOptionViewItem &option,
     return QRect(rect.right() - badgeWidth - 8, rect.top() + 8, badgeWidth, 18);
 }
 
+QRect TaskCardDelegate::workStatusIconRect(const QStyleOptionViewItem &option,
+                                            const QModelIndex &index)
+{
+    QRect rect = option.rect.adjusted(4, 2, -4, -2);
+    if (index.row() > 0) {
+        int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
+        int curPriority = index.data(TaskListModel::PriorityRole).toInt();
+        if (curPriority != prevPriority) {
+            rect.adjust(0, 20, 0, 0);
+        }
+    }
+    return QRect(rect.left() + 4, rect.top() + 4, 28, 28);
+}
+
 // Draw status icon (left side, no background)
 static void drawStatusBadge(QPainter *painter, const QRect &cardRect,
                             TaskWorkStatus ws, const QFont &baseFont)

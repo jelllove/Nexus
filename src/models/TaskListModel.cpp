@@ -60,6 +60,15 @@ void TaskListModel::loadTasks(int productId, TaskStatus status)
     endResetModel();
 }
 
+void TaskListModel::loadDeletedTasks()
+{
+    m_currentProductId = -1;
+    m_currentStatus = TaskStatus::Deleted;
+    beginResetModel();
+    m_tasks = DatabaseManager::instance().getDeletedTasks();
+    endResetModel();
+}
+
 void TaskListModel::loadSearchResults(const QList<Task> &tasks)
 {
     beginResetModel();
@@ -107,7 +116,72 @@ void TaskListModel::removeTask(int row)
 
 void TaskListModel::refresh()
 {
-    if (m_currentProductId > 0) {
+    if (m_currentStatus == TaskStatus::Deleted) {
+        loadDeletedTasks();
+    } else if (m_currentProductId > 0) {
         loadTasks(m_currentProductId, m_currentStatus);
     }
+}
+
+Qt::ItemFlags TaskListModel::flags(const QModelIndex &index) const
+{
+    Qt::ItemFlags defaultFlags = QAbstractListModel::flags(index);
+    if (index.isValid()) {
+        return defaultFlags | Qt::ItemIsDragEnabled;
+    }
+    return defaultFlags | Qt::ItemIsDropEnabled;
+}
+
+Qt::DropActions TaskListModel::supportedDropActions() const
+{
+    return Qt::MoveAction;
+}
+
+bool TaskListModel::canDropAt(int fromRow, int toRow) const
+{
+    if (fromRow < 0 || fromRow >= m_tasks.size()) return false;
+    if (toRow < 0 || toRow > m_tasks.size()) return false;
+
+    int fromPriority = static_cast<int>(m_tasks[fromRow].priority);
+
+    // Determine the priority at the drop position
+    int targetPriority;
+    if (toRow == m_tasks.size()) {
+        targetPriority = static_cast<int>(m_tasks[toRow - 1].priority);
+    } else if (toRow == fromRow || toRow == fromRow + 1) {
+        return true; // No-op move
+    } else {
+        targetPriority = static_cast<int>(m_tasks[toRow].priority);
+    }
+
+    return fromPriority == targetPriority;
+}
+
+bool TaskListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int count,
+                              const QModelIndex &destinationParent, int destinationRow)
+{
+    Q_UNUSED(sourceParent);
+    Q_UNUSED(destinationParent);
+    if (count != 1) return false;
+    if (!canDropAt(sourceRow, destinationRow)) return false;
+    if (destinationRow == sourceRow || destinationRow == sourceRow + 1) return true;
+
+    int destRow = destinationRow > sourceRow ? destinationRow - 1 : destinationRow;
+
+    beginMoveRows(QModelIndex(), sourceRow, sourceRow,
+                  QModelIndex(), destinationRow);
+    m_tasks.move(sourceRow, destRow);
+    endMoveRows();
+
+    // Persist the new order for tasks with the same priority
+    int priority = static_cast<int>(m_tasks[destRow].priority);
+    QList<int> sameGroupIds;
+    for (const auto &t : m_tasks) {
+        if (static_cast<int>(t.priority) == priority) {
+            sameGroupIds.append(t.id);
+        }
+    }
+    DatabaseManager::instance().reorderTasks(sameGroupIds);
+
+    return true;
 }

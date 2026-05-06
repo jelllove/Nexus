@@ -29,8 +29,14 @@ public:
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    Qt::ItemFlags flags(const QModelIndex &index) const override;
+    Qt::DropActions supportedDropActions() const override;
+    bool moveRows(const QModelIndex &sourceParent, int sourceRow, int count,
+                  const QModelIndex &destinationParent, int destinationRow);
+    bool canDropAt(int fromRow, int toRow) const;
 
     void loadTasks(int productId, TaskStatus status = TaskStatus::Active);
+    void loadDeletedTasks();
     void loadSearchResults(const QList<Task> &tasks);
     int taskIdAt(int row) const;
     int rowForTaskId(int taskId) const;

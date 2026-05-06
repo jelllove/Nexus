@@ -54,6 +54,12 @@ void TaskPane::setupUi()
     m_archivedButton->setCursor(Qt::PointingHandCursor);
     filterLayout->addWidget(m_archivedButton, 1);  // Stretch factor 1
 
+    m_deletedButton = new QPushButton("Deleted", this);
+    m_deletedButton->setCheckable(true);
+    m_deletedButton->setChecked(false);
+    m_deletedButton->setCursor(Qt::PointingHandCursor);
+    filterLayout->addWidget(m_deletedButton, 1);  // Stretch factor 1
+
     layout->addLayout(filterLayout);
     updateFilterButtonStyles();
 
@@ -68,6 +74,11 @@ void TaskPane::setupUi()
         "QListView::item { background-color: white; border-radius: 4px; }"
         "QListView::item:selected { background-color: #d5e8f0; border: 1px solid #2980b9; }"
         "QListView::item:hover { background-color: #eaf2f8; }");
+    m_listView->setDragEnabled(true);
+    m_listView->setAcceptDrops(true);
+    m_listView->setDropIndicatorShown(true);
+    m_listView->setDragDropMode(QAbstractItemView::InternalMove);
+    m_listView->setDefaultDropAction(Qt::MoveAction);
     layout->addWidget(m_listView, 1);
 
     // Add button
@@ -82,10 +93,26 @@ void TaskPane::setupUi()
     connect(m_addButton, &QPushButton::clicked, this, &TaskPane::onAddTask);
 
     connect(m_activeButton, &QPushButton::clicked, this, [this]() {
-        onStatusToggle(false);
+        m_showingArchived = false;
+        m_showingDeleted = false;
+        updateFilterButtonStyles();
+        if (m_currentProductId > 0) {
+            m_model->loadTasks(m_currentProductId, TaskStatus::Active);
+        }
     });
     connect(m_archivedButton, &QPushButton::clicked, this, [this]() {
-        onStatusToggle(true);
+        m_showingArchived = true;
+        m_showingDeleted = false;
+        updateFilterButtonStyles();
+        if (m_currentProductId > 0) {
+            m_model->loadTasks(m_currentProductId, TaskStatus::Archived);
+        }
+    });
+    connect(m_deletedButton, &QPushButton::clicked, this, [this]() {
+        m_showingArchived = false;
+        m_showingDeleted = true;
+        updateFilterButtonStyles();
+        m_model->loadDeletedTasks();
     });
 
     // Periodic refresh timer for live progress bar updates
@@ -108,10 +135,13 @@ void TaskPane::updateFilterButtonStyles()
         "padding: 8px; font-size: 12px; }"
         "QPushButton:hover { background-color: #4a6580; }";
 
-    m_activeButton->setStyleSheet(m_showingArchived ? unselectedStyle : selectedStyle);
+    bool isActive = !m_showingArchived && !m_showingDeleted;
+    m_activeButton->setStyleSheet(isActive ? selectedStyle : unselectedStyle);
     m_archivedButton->setStyleSheet(m_showingArchived ? selectedStyle : unselectedStyle);
-    m_activeButton->setChecked(!m_showingArchived);
+    m_deletedButton->setStyleSheet(m_showingDeleted ? selectedStyle : unselectedStyle);
+    m_activeButton->setChecked(isActive);
     m_archivedButton->setChecked(m_showingArchived);
+    m_deletedButton->setChecked(m_showingDeleted);
 }
 
 void TaskPane::setupContextMenu()
@@ -122,11 +152,36 @@ void TaskPane::setupContextMenu()
         if (!index.isValid()) return;
 
         m_listView->setCurrentIndex(index);
+        int taskId = m_model->taskIdAt(index.row());
 
         QMenu menu(this);
         menu.setStyleSheet(
             "QMenu { background-color: #2c3e50; color: white; border: 1px solid #3d566e; }"
             "QMenu::item:selected { background-color: #2980b9; }");
+
+        // Deleted tasks have a simplified context menu
+        if (m_showingDeleted) {
+            QAction *restoreAction = menu.addAction("Restore");
+            menu.addSeparator();
+            QAction *permDeleteAction = menu.addAction("Permanently Delete");
+
+            QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
+            if (selected == restoreAction) {
+                DatabaseManager::instance().restoreTask(taskId);
+                m_model->loadDeletedTasks();
+                emit taskSelected(-1);
+            } else if (selected == permDeleteAction) {
+                auto result = QMessageBox::warning(this, "Permanently Delete",
+                    "This task will be permanently deleted and cannot be recovered.\nAre you sure?",
+                    QMessageBox::Yes | QMessageBox::No);
+                if (result == QMessageBox::Yes) {
+                    DatabaseManager::instance().permanentlyDeleteTask(taskId);
+                    m_model->loadDeletedTasks();
+                    emit taskSelected(-1);
+                }
+            }
+            return;
+        }
 
         // Priority submenu
         QMenu *priorityMenu = menu.addMenu("Set Priority");
@@ -137,7 +192,6 @@ void TaskPane::setupContextMenu()
         priorityMenu->addAction("P3 - Low");
 
         // Due date actions
-        int taskId = m_model->taskIdAt(index.row());
         QDateTime currentDue = index.data(TaskListModel::DueDateRole).toDateTime();
         QAction *dueDateAction = nullptr;
         QAction *clearDueDateAction = nullptr;
@@ -154,11 +208,11 @@ void TaskPane::setupContextMenu()
         statusMenu->setStyleSheet(menu.styleSheet());
         QAction *statusActions[5];
         const char *statusLabels[] = {
-            "\xE2\x8F\xAF\xEF\xB8\x8F Not Started",           // ⏯️
-            "\xF0\x9F\x8F\x83 Ongoing",               // 🏃
-            "\xE2\x8F\xB8\xEF\xB8\x8F Paused",       // ⏸️
-            "\xE2\x9C\x85 Completed",                  // ✅
-            "\xE2\x8F\xB3 Waiting"                     // ⏳
+            "\xE2\x8F\xAF\xEF\xB8\x8F Not Started",
+            "\xF0\x9F\x8F\x83 Ongoing",
+            "\xE2\x8F\xB8\xEF\xB8\x8F Paused",
+            "\xE2\x9C\x85 Completed",
+            "\xE2\x8F\xB3 Waiting"
         };
         for (int i = 0; i < 5; ++i) {
             statusActions[i] = statusMenu->addAction(QString::fromUtf8(statusLabels[i]));
@@ -249,15 +303,22 @@ int TaskPane::selectedTaskId() const
 
 void TaskPane::onTaskClicked(const QModelIndex &index)
 {
-    // Check if the click hit the priority badge
     QPoint clickPos = m_listView->viewport()->mapFromGlobal(QCursor::pos());
     QStyleOptionViewItem option;
     option.rect = m_listView->visualRect(index);
     option.font = m_listView->font();
-    QRect badgeRect = TaskCardDelegate::priorityBadgeRect(option, index);
 
+    // Check if the click hit the priority badge
+    QRect badgeRect = TaskCardDelegate::priorityBadgeRect(option, index);
     if (badgeRect.contains(clickPos)) {
         showPriorityPopup(index, QCursor::pos());
+        return;
+    }
+
+    // Check if the click hit the work status icon
+    QRect statusRect = TaskCardDelegate::workStatusIconRect(option, index);
+    if (statusRect.contains(clickPos)) {
+        showWorkStatusPopup(index, QCursor::pos());
         return;
     }
 
@@ -284,6 +345,44 @@ void TaskPane::showPriorityPopup(const QModelIndex &index, const QPoint &globalP
     for (int i = 0; i < menu.actions().size(); ++i) {
         if (selected == menu.actions()[i]) {
             DatabaseManager::instance().updateTaskPriority(taskId, static_cast<TaskPriority>(i));
+            m_model->refresh();
+            return;
+        }
+    }
+}
+
+void TaskPane::showWorkStatusPopup(const QModelIndex &index, const QPoint &globalPos)
+{
+    int currentStatus = index.data(TaskListModel::WorkStatusRole).toInt();
+
+    QMenu menu(this);
+    menu.setStyleSheet(
+        "QMenu { background-color: #2c3e50; color: white; border: 1px solid #3d566e; }"
+        "QMenu::item:selected { background-color: #2980b9; }"
+        "QMenu::item:disabled { color: #7f8c8d; }");
+
+    const char *labels[] = {
+        "\xE2\x8F\xAF\xEF\xB8\x8F Not Started",
+        "\xF0\x9F\x8F\x83 Ongoing",
+        "\xE2\x8F\xB8\xEF\xB8\x8F Paused",
+        "\xE2\x9C\x85 Completed",
+        "\xE2\x8F\xB3 Waiting"
+    };
+
+    for (int i = 0; i < 5; ++i) {
+        QAction *action = menu.addAction(QString::fromUtf8(labels[i]));
+        if (i == currentStatus) {
+            action->setEnabled(false);
+        }
+    }
+
+    QAction *selected = menu.exec(globalPos);
+    if (!selected) return;
+
+    int taskId = m_model->taskIdAt(index.row());
+    for (int i = 0; i < menu.actions().size(); ++i) {
+        if (selected == menu.actions()[i]) {
+            DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
             m_model->refresh();
             return;
         }

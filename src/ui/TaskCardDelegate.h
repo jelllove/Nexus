@@ -17,4 +17,6 @@ public:
 
     static QRect priorityBadgeRect(const QStyleOptionViewItem &option,
                                    const QModelIndex &index);
+    static QRect workStatusIconRect(const QStyleOptionViewItem &option,
+                                    const QModelIndex &index);
 };

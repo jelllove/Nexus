@@ -13,7 +13,8 @@ enum class TaskPriority {
 
 enum class TaskStatus {
     Active,
-    Archived
+    Archived,
+    Deleted
 };
 
 enum class TaskWorkStatus {

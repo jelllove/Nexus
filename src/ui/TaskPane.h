@@ -36,6 +36,8 @@ private:
     void setupContextMenu();
     void updateFilterButtonStyles();
     void showPriorityPopup(const QModelIndex &index, const QPoint &globalPos);
+    void showWorkStatusPopup(const QModelIndex &index, const QPoint &globalPos);
+    void handleDropReorder(int fromRow, int toRow);
     QDateTime showDueDateDialog(const QDateTime &current = QDateTime());
 
     QListView *m_listView;
@@ -44,7 +46,9 @@ private:
     QLabel *m_titleLabel;
     QPushButton *m_activeButton;
     QPushButton *m_archivedButton;
+    QPushButton *m_deletedButton;
     QTimer *m_refreshTimer;
     int m_currentProductId = -1;
     bool m_showingArchived = false;
+    bool m_showingDeleted = false;
 };

@@ -2,9 +2,17 @@
 #include <QIcon>
 #include <QSharedMemory>
 #include <QSettings>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QtWebEngineWidgets/QWebEngineView>
 #include "app/MainWindow.h"
 #include "db/DatabaseManager.h"
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
+static const char *SOCKET_NAME = "NexusTaskManagerIPC";
 
 int main(int argc, char *argv[])
 {
@@ -16,7 +24,14 @@ int main(int argc, char *argv[])
     // Single-instance guard: prevent multiple Nexus processes
     QSharedMemory singleInstanceGuard("NexusTaskManagerSingleInstance");
     if (!singleInstanceGuard.create(1)) {
-        // Another instance is already running
+        // Another instance is already running — ask it to show itself
+        QLocalSocket socket;
+        socket.connectToServer(SOCKET_NAME);
+        if (socket.waitForConnected(1000)) {
+            socket.write("show");
+            socket.waitForBytesWritten(1000);
+            socket.disconnectFromServer();
+        }
         return 0;
     }
 
@@ -31,11 +46,33 @@ int main(int argc, char *argv[])
     // Daily automatic backup
     DatabaseManager::instance().backupDatabase();
 
+    // Purge tasks deleted more than 30 days ago
+    DatabaseManager::instance().purgeOldDeletedTasks(30);
+
     // Create and show main window
     MainWindow mainWindow;
     mainWindow.show();
     mainWindow.raise();
     mainWindow.activateWindow();
+
+    // IPC server: listen for "show" messages from other instances
+    QLocalServer::removeServer(SOCKET_NAME);
+    QLocalServer ipcServer;
+    ipcServer.listen(SOCKET_NAME);
+    QObject::connect(&ipcServer, &QLocalServer::newConnection, [&]() {
+        QLocalSocket *client = ipcServer.nextPendingConnection();
+        QObject::connect(client, &QLocalSocket::readyRead, [&mainWindow, client]() {
+            client->readAll();
+            mainWindow.show();
+            mainWindow.raise();
+            mainWindow.activateWindow();
+#ifdef Q_OS_WIN
+            // Force bring to front on Windows
+            SetForegroundWindow(reinterpret_cast<HWND>(mainWindow.winId()));
+#endif
+            client->deleteLater();
+        });
+    });
 
     return app.exec();
 }

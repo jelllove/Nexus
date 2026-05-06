@@ -219,7 +219,28 @@ bool DatabaseManager::migrateDatabase()
     }
 
     // Future migrations go here:
-    // if (dbVersion < 5) { ... setSetting("db_version", "5"); dbVersion = 5; }
+    // if (dbVersion < 6) { ... setSetting("db_version", "6"); dbVersion = 6; }
+
+    // Migration v4 -> v5: add deleted_at column for soft-delete
+    if (dbVersion < 5) {
+        query.exec("PRAGMA table_info(tasks)");
+        bool hasDeletedAt = false;
+        while (query.next()) {
+            if (query.value(1).toString() == "deleted_at") {
+                hasDeletedAt = true;
+                break;
+            }
+        }
+        if (!hasDeletedAt) {
+            if (!query.exec("ALTER TABLE tasks ADD COLUMN deleted_at DATETIME")) {
+                qWarning() << "Failed to add deleted_at column:" << query.lastError().text();
+                return false;
+            }
+            qInfo() << "Migration v5: added deleted_at column to tasks table";
+        }
+        setSetting("db_version", "5");
+        dbVersion = 5;
+    }
 
     return true;
 }
@@ -514,13 +535,67 @@ bool DatabaseManager::reactivateTask(int taskId)
 bool DatabaseManager::deleteTask(int taskId)
 {
     QSqlQuery query(m_db);
-    query.prepare("DELETE FROM tasks WHERE id = ?");
+    query.prepare("UPDATE tasks SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP WHERE id = ?");
     query.addBindValue(taskId);
     if (query.exec()) {
         emit taskDeleted(taskId);
         return true;
     }
     return false;
+}
+
+bool DatabaseManager::restoreTask(int taskId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE tasks SET status = 'active', deleted_at = NULL WHERE id = ?");
+    query.addBindValue(taskId);
+    return query.exec();
+}
+
+bool DatabaseManager::permanentlyDeleteTask(int taskId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM tasks WHERE id = ?");
+    query.addBindValue(taskId);
+    return query.exec();
+}
+
+void DatabaseManager::purgeOldDeletedTasks(int maxAgeDays)
+{
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM tasks WHERE status = 'deleted' "
+                  "AND deleted_at < datetime('now', ? || ' days')");
+    query.addBindValue(QString("-%1").arg(maxAgeDays));
+    query.exec();
+}
+
+QList<Task> DatabaseManager::getDeletedTasks()
+{
+    QList<Task> tasks;
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT id, product_id, title, content, priority, status, sort_order, "
+        "created_at, updated_at, archived_at, due_date, work_status, deleted_at "
+        "FROM tasks WHERE status = 'deleted' "
+        "ORDER BY deleted_at DESC");
+    query.exec();
+
+    while (query.next()) {
+        Task t;
+        t.id = query.value(0).toInt();
+        t.productId = query.value(1).toInt();
+        t.title = query.value(2).toString();
+        t.content = query.value(3).toString();
+        t.priority = static_cast<TaskPriority>(query.value(4).toInt());
+        t.status = TaskStatus::Deleted;
+        t.sortOrder = query.value(6).toInt();
+        t.createdAt = query.value(7).toDateTime();
+        t.updatedAt = query.value(8).toDateTime();
+        t.dueDate = query.value(10).toDateTime();
+        t.workStatus = static_cast<TaskWorkStatus>(query.value(11).toInt());
+        tasks.append(t);
+    }
+    return tasks;
 }
 
 bool DatabaseManager::reorderTasks(const QList<int> &taskIds)
