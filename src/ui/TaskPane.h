@@ -24,6 +24,7 @@ signals:
 
 private slots:
     void onTaskClicked(const QModelIndex &index);
+    void onTaskDoubleClicked(const QModelIndex &index);
     void onAddTask();
     void onDeleteTask();
     void onArchiveTask();

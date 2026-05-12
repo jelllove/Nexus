@@ -242,6 +242,26 @@ bool DatabaseManager::migrateDatabase()
         dbVersion = 5;
     }
 
+    // Migration v5 -> v6: create subtasks table
+    if (dbVersion < 6) {
+        if (!query.exec(
+            "CREATE TABLE IF NOT EXISTS subtasks ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  task_id INTEGER NOT NULL,"
+            "  title TEXT NOT NULL DEFAULT '',"
+            "  completed INTEGER DEFAULT 0,"
+            "  sort_order INTEGER DEFAULT 0,"
+            "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+            "  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE"
+            ")")) {
+            qWarning() << "Failed to create subtasks table:" << query.lastError().text();
+            return false;
+        }
+        qInfo() << "Migration v6: created subtasks table";
+        setSetting("db_version", "6");
+        dbVersion = 6;
+    }
+
     return true;
 }
 
@@ -612,6 +632,79 @@ bool DatabaseManager::reorderTasks(const QList<int> &taskIds)
         }
     }
     return m_db.commit();
+}
+
+// --- Sub-tasks ---
+
+QList<SubTask> DatabaseManager::getSubtasks(int taskId)
+{
+    QList<SubTask> subtasks;
+    QSqlQuery query(m_db);
+    query.prepare("SELECT id, task_id, title, completed, sort_order FROM subtasks "
+                  "WHERE task_id = ? ORDER BY sort_order ASC, id ASC");
+    query.addBindValue(taskId);
+    query.exec();
+    while (query.next()) {
+        SubTask st;
+        st.id = query.value(0).toInt();
+        st.taskId = query.value(1).toInt();
+        st.title = query.value(2).toString();
+        st.completed = query.value(3).toBool();
+        st.sortOrder = query.value(4).toInt();
+        subtasks.append(st);
+    }
+    return subtasks;
+}
+
+int DatabaseManager::getSubtaskCount(int taskId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT COUNT(*) FROM subtasks WHERE task_id = ?");
+    query.addBindValue(taskId);
+    if (query.exec() && query.next()) {
+        return query.value(0).toInt();
+    }
+    return 0;
+}
+
+int DatabaseManager::addSubtask(int taskId, const QString &title)
+{
+    QSqlQuery query(m_db);
+    query.prepare("INSERT INTO subtasks (task_id, title, sort_order) "
+                  "VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?))");
+    query.addBindValue(taskId);
+    query.addBindValue(title);
+    query.addBindValue(taskId);
+    if (query.exec()) {
+        return query.lastInsertId().toInt();
+    }
+    return -1;
+}
+
+bool DatabaseManager::toggleSubtask(int subtaskId, bool completed)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE subtasks SET completed = ? WHERE id = ?");
+    query.addBindValue(completed ? 1 : 0);
+    query.addBindValue(subtaskId);
+    return query.exec();
+}
+
+bool DatabaseManager::deleteSubtask(int subtaskId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM subtasks WHERE id = ?");
+    query.addBindValue(subtaskId);
+    return query.exec();
+}
+
+bool DatabaseManager::renameSubtask(int subtaskId, const QString &title)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE subtasks SET title = ? WHERE id = ?");
+    query.addBindValue(title);
+    query.addBindValue(subtaskId);
+    return query.exec();
 }
 
 // --- Content History (Undo/Redo) ---

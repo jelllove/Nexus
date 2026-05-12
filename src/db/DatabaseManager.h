@@ -48,6 +48,14 @@ public:
     QList<Task> getDeletedTasks();
     bool reorderTasks(const QList<int> &taskIds);
 
+    // Sub-task CRUD
+    QList<SubTask> getSubtasks(int taskId);
+    int getSubtaskCount(int taskId);
+    int addSubtask(int taskId, const QString &title);
+    bool toggleSubtask(int subtaskId, bool completed);
+    bool deleteSubtask(int subtaskId);
+    bool renameSubtask(int subtaskId, const QString &title);
+
     // Content history (undo/redo)
     void saveContentSnapshot(int taskId, const QString &content);
     QList<QString> getContentHistory(int taskId);

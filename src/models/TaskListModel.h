@@ -2,7 +2,15 @@
 
 #include <QAbstractListModel>
 #include <QList>
+#include <QSet>
 #include "models/Task.h"
+
+struct DisplayRow {
+    enum Type { MainTask, SubTaskRow };
+    Type type = MainTask;
+    Task task;
+    SubTask subtask;
+};
 
 class TaskListModel : public QAbstractListModel
 {
@@ -22,7 +30,14 @@ public:
         DueDateRole,
         DueDateIconRole,
         WorkStatusRole,
-        WorkStatusIconRole
+        WorkStatusIconRole,
+        IsSubTaskRole,
+        SubTaskCompletedRole,
+        SubTaskIdRole,
+        ParentTaskIdRole,
+        HasSubTasksRole,
+        IsExpandedRole,
+        IsActiveTaskRole
     };
 
     explicit TaskListModel(QObject *parent = nullptr);
@@ -45,11 +60,22 @@ public:
     void removeTask(int row);
     void refresh();
 
+    void toggleExpand(int taskId);
+    bool isExpanded(int taskId) const;
+
+    void setActiveTaskId(int taskId) { m_activeTaskId = taskId; }
+    int activeTaskId() const { return m_activeTaskId; }
+
     int currentProductId() const { return m_currentProductId; }
     TaskStatus currentStatus() const { return m_currentStatus; }
 
 private:
+    void rebuildDisplayRows();
+
     QList<Task> m_tasks;
+    QList<DisplayRow> m_displayRows;
+    QSet<int> m_expandedTasks;
+    int m_activeTaskId = -1;
     int m_currentProductId = -1;
     TaskStatus m_currentStatus = TaskStatus::Active;
 };

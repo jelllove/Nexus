@@ -25,6 +25,14 @@ enum class TaskWorkStatus {
     Waiting = 4
 };
 
+struct SubTask {
+    int id = -1;
+    int taskId = -1;
+    QString title;
+    bool completed = false;
+    int sortOrder = 0;
+};
+
 struct Task {
     int id = 0;
     int productId = 0;

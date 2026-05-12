@@ -34,13 +34,39 @@ QRect TaskCardDelegate::workStatusIconRect(const QStyleOptionViewItem &option,
 {
     QRect rect = option.rect.adjusted(4, 2, -4, -2);
     if (index.row() > 0) {
-        int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
-        int curPriority = index.data(TaskListModel::PriorityRole).toInt();
-        if (curPriority != prevPriority) {
-            rect.adjust(0, 20, 0, 0);
+        bool prevIsSubTask = index.sibling(index.row() - 1, 0).data(TaskListModel::IsSubTaskRole).toBool();
+        if (!prevIsSubTask) {
+            int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
+            int curPriority = index.data(TaskListModel::PriorityRole).toInt();
+            if (curPriority != prevPriority) {
+                rect.adjust(0, 20, 0, 0);
+            }
         }
     }
     return QRect(rect.left() + 4, rect.top() + 4, 28, 28);
+}
+
+QRect TaskCardDelegate::expandIconRect(const QStyleOptionViewItem &option,
+                                        const QModelIndex &index)
+{
+    QRect rect = option.rect.adjusted(4, 2, -4, -2);
+    if (index.row() > 0) {
+        bool prevIsSubTask = index.sibling(index.row() - 1, 0).data(TaskListModel::IsSubTaskRole).toBool();
+        if (!prevIsSubTask) {
+            int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
+            int curPriority = index.data(TaskListModel::PriorityRole).toInt();
+            if (curPriority != prevPriority) {
+                rect.adjust(0, 20, 0, 0);
+            }
+        }
+    }
+    return QRect(rect.left() - 17, rect.top() + rect.height() / 2 - 8, 16, 16);
+}
+
+QRect TaskCardDelegate::subtaskCheckboxRect(const QStyleOptionViewItem &option)
+{
+    QRect rect = option.rect.adjusted(4, 1, -4, -1);
+    return QRect(rect.left() + 30, rect.top() + 6, 18, 18);
 }
 
 // Draw status icon (left side, no background)
@@ -67,14 +93,60 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing);
 
+    // --- SubTask row rendering ---
+    bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
+    if (isSubTask) {
+        QRect rect = option.rect.adjusted(4, 1, -4, -1);
+        bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
+
+        // Background
+        if (option.state & QStyle::State_Selected) {
+            painter->fillRect(rect, QColor("#dfe6e9"));
+        } else if (option.state & QStyle::State_MouseOver) {
+            painter->fillRect(rect, QColor("#f0f3f4"));
+        } else {
+            painter->fillRect(rect, completed ? QColor("#f8f9f9") : QColor("#ffffff"));
+        }
+
+        // Indent + checkbox
+        int indent = 30;
+        QRect checkRect(rect.left() + indent, rect.top() + 6, 18, 18);
+        painter->setPen(QPen(completed ? QColor("#27ae60") : QColor("#95a5a6"), 1.5));
+        painter->setBrush(completed ? QColor("#27ae60") : Qt::NoBrush);
+        painter->drawRoundedRect(checkRect, 3, 3);
+        if (completed) {
+            painter->setPen(QPen(Qt::white, 2));
+            painter->drawLine(checkRect.left() + 4, checkRect.center().y(),
+                              checkRect.center().x(), checkRect.bottom() - 4);
+            painter->drawLine(checkRect.center().x(), checkRect.bottom() - 4,
+                              checkRect.right() - 3, checkRect.top() + 4);
+        }
+
+        // Title
+        QString title = index.data(TaskListModel::TitleRole).toString();
+        QFont titleFont = option.font;
+        titleFont.setPointSize(10);
+        painter->setFont(titleFont);
+        painter->setPen(completed ? QColor("#b0b8bc") : QColor("#2c3e50"));
+        QRect titleRect(checkRect.right() + 8, rect.top() + 4, rect.width() - indent - 34, 22);
+        painter->drawText(titleRect, Qt::AlignLeft | Qt::AlignVCenter,
+                          painter->fontMetrics().elidedText(title, Qt::ElideRight, titleRect.width()));
+
+        painter->restore();
+        return;
+    }
+
+    // --- Main Task rendering (existing code below) ---
     QRect fullRect = option.rect.adjusted(4, 2, -4, -2);
     QRect rect = fullRect;
 
     // Priority separator
     int curPriority = index.data(TaskListModel::PriorityRole).toInt();
     if (index.row() > 0) {
-        int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
-        if (curPriority != prevPriority) {
+        bool prevIsSubTask = index.sibling(index.row() - 1, 0).data(TaskListModel::IsSubTaskRole).toBool();
+        if (!prevIsSubTask) {
+            int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
+            if (curPriority != prevPriority) {
             int sepY = fullRect.top() + 8;
             QColor sepColor("#d5dbdb");
             painter->setPen(QPen(sepColor, 1, Qt::SolidLine));
@@ -94,6 +166,7 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
             painter->drawText(labelBg, Qt::AlignCenter, label);
 
             rect.adjust(0, 20, 0, 0);
+            }
         }
     }
 
@@ -125,6 +198,19 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
         QColor mutedBar = priorityColor;
         mutedBar.setAlpha(90);
         painter->fillRect(QRect(rect.left(), rect.top(), 4, rect.height()), mutedBar);
+
+        // Expand/collapse icon for tasks with subtasks (outside card, left margin)
+        bool hasSubTasks2 = index.data(TaskListModel::HasSubTasksRole).toBool();
+        if (hasSubTasks2) {
+            bool expanded2 = index.data(TaskListModel::IsExpandedRole).toBool();
+            QFont expandFont2 = option.font;
+            expandFont2.setPointSize(9);
+            painter->setFont(expandFont2);
+            painter->setPen(QColor("#999999"));
+            int iconY2 = rect.top() + rect.height() / 2 - 8;
+            QRect expandRect2(rect.left() - 17, iconY2, 16, 16);
+            painter->drawText(expandRect2, Qt::AlignCenter, expanded2 ? QString::fromUtf8("\xe2\x9e\x96") : QString::fromUtf8("\xe2\x9e\x95"));
+        }
 
         // Status badge
         drawStatusBadge(painter, rect, workStatus, option.font);
@@ -189,6 +275,16 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
             painter->drawText(dateRect, Qt::AlignLeft | Qt::AlignVCenter, dateStr);
         }
 
+        // Selected indicator
+        if (index.data(TaskListModel::IsActiveTaskRole).toBool()) {
+            QFont indFont = option.font;
+            indFont.setPointSize(12);
+            painter->setFont(indFont);
+            painter->setPen(QColor("#7f8c8d"));
+            QRect indRect(rect.right() - 24, rect.top() + rect.height() / 2 - 10, 20, 20);
+            painter->drawText(indRect, Qt::AlignCenter, QString::fromUtf8("\xF0\x9F\x91\x88"));
+        }
+
         painter->restore();
         return;
     }
@@ -209,6 +305,19 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
 
     // Left color bar
     painter->fillRect(QRect(rect.left(), rect.top(), 4, rect.height()), priorityColor);
+
+    // Expand/collapse icon for tasks with subtasks (outside card, left margin)
+    bool hasSubTasks = index.data(TaskListModel::HasSubTasksRole).toBool();
+    if (hasSubTasks) {
+        bool expanded = index.data(TaskListModel::IsExpandedRole).toBool();
+        QFont expandFont = option.font;
+        expandFont.setPointSize(9);
+        painter->setFont(expandFont);
+        painter->setPen(QColor("#555555"));
+        int iconY = rect.top() + rect.height() / 2 - 8;
+        QRect expandRect(rect.left() - 17, iconY, 16, 16);
+        painter->drawText(expandRect, Qt::AlignCenter, expanded ? QString::fromUtf8("\xe2\x9e\x96") : QString::fromUtf8("\xe2\x9e\x95"));
+    }
 
     // Status badge
     drawStatusBadge(painter, rect, workStatus, option.font);
@@ -327,6 +436,16 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
         painter->drawText(dueTextRect, Qt::AlignLeft | Qt::AlignVCenter, dueText);
     }
 
+    // Selected indicator
+    if (index.data(TaskListModel::IsActiveTaskRole).toBool()) {
+        QFont indFont = option.font;
+        indFont.setPointSize(12);
+        painter->setFont(indFont);
+        painter->setPen(QColor("#2c3e50"));
+        QRect indRect(rect.right() - 24, rect.top() + rect.height() / 2 - 10, 20, 20);
+        painter->drawText(indRect, Qt::AlignCenter, QString::fromUtf8("\xF0\x9F\x91\x88"));
+    }
+
     painter->restore();
 }
 
@@ -334,22 +453,32 @@ QSize TaskCardDelegate::sizeHint(const QStyleOptionViewItem &option,
                                   const QModelIndex &index) const
 {
     Q_UNUSED(option);
+
+    // SubTask rows are compact
+    if (index.data(TaskListModel::IsSubTaskRole).toBool()) {
+        return QSize(280, 30);
+    }
+
     TaskWorkStatus ws = static_cast<TaskWorkStatus>(
         index.data(TaskListModel::WorkStatusRole).toInt());
     QDateTime dueDate = index.data(TaskListModel::DueDateRole).toDateTime();
 
     int baseHeight;
     if (ws == TaskWorkStatus::Completed) {
-        baseHeight = 88;  // Completed: compact, no progress bar
+        baseHeight = 88;
     } else {
         baseHeight = dueDate.isValid() ? 108 : 88;
     }
 
     if (index.row() > 0) {
-        int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
-        int curPriority = index.data(TaskListModel::PriorityRole).toInt();
-        if (curPriority != prevPriority) {
-            baseHeight += 20;
+        // Only count priority separators between main tasks
+        bool prevIsSubTask = index.sibling(index.row() - 1, 0).data(TaskListModel::IsSubTaskRole).toBool();
+        if (!prevIsSubTask) {
+            int prevPriority = index.sibling(index.row() - 1, 0).data(TaskListModel::PriorityRole).toInt();
+            int curPriority = index.data(TaskListModel::PriorityRole).toInt();
+            if (curPriority != prevPriority) {
+                baseHeight += 20;
+            }
         }
     }
 

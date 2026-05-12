@@ -90,6 +90,7 @@ void TaskPane::setupUi()
     layout->addWidget(m_addButton);
 
     connect(m_listView, &QListView::clicked, this, &TaskPane::onTaskClicked);
+    connect(m_listView, &QListView::doubleClicked, this, &TaskPane::onTaskDoubleClicked);
     connect(m_addButton, &QPushButton::clicked, this, &TaskPane::onAddTask);
 
     connect(m_activeButton, &QPushButton::clicked, this, [this]() {
@@ -152,12 +153,44 @@ void TaskPane::setupContextMenu()
         if (!index.isValid()) return;
 
         m_listView->setCurrentIndex(index);
-        int taskId = m_model->taskIdAt(index.row());
 
         QMenu menu(this);
         menu.setStyleSheet(
             "QMenu { background-color: #2c3e50; color: white; border: 1px solid #3d566e; }"
             "QMenu::item:selected { background-color: #2980b9; }");
+
+        // SubTask context menu
+        bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
+        if (isSubTask) {
+            int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
+            bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
+
+            QAction *toggleAction = menu.addAction(completed ? "Mark Incomplete" : "Mark Complete");
+            QAction *renameAction = menu.addAction("Rename");
+            menu.addSeparator();
+            QAction *deleteAction = menu.addAction("Delete");
+
+            QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
+            if (selected == toggleAction) {
+                DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
+                m_model->refresh();
+            } else if (selected == renameAction) {
+                QString currentTitle = index.data(TaskListModel::TitleRole).toString();
+                bool ok;
+                QString newTitle = QInputDialog::getText(this, "Rename Sub Task",
+                    "Title:", QLineEdit::Normal, currentTitle, &ok);
+                if (ok && !newTitle.trimmed().isEmpty()) {
+                    DatabaseManager::instance().renameSubtask(subtaskId, newTitle.trimmed());
+                    m_model->refresh();
+                }
+            } else if (selected == deleteAction) {
+                DatabaseManager::instance().deleteSubtask(subtaskId);
+                m_model->refresh();
+            }
+            return;
+        }
+
+        int taskId = m_model->taskIdAt(index.row());
 
         // Deleted tasks have a simplified context menu
         if (m_showingDeleted) {
@@ -221,6 +254,10 @@ void TaskPane::setupContextMenu()
             }
         }
 
+        // Sub tasks
+        menu.addSeparator();
+        QAction *addSubTaskAction = menu.addAction("Add Sub Task...");
+
         // Archive/Reactivate
         bool isArchived = (m_model->currentStatus() == TaskStatus::Archived);
         QAction *archiveAction = nullptr;
@@ -273,6 +310,18 @@ void TaskPane::setupContextMenu()
             }
         } else if (selected == deleteAction) {
             onDeleteTask();
+        } else if (selected == addSubTaskAction) {
+            bool ok;
+            QString title = QInputDialog::getText(this, "Add Sub Task",
+                "Sub task title:", QLineEdit::Normal, QString(), &ok);
+            if (ok && !title.trimmed().isEmpty()) {
+                DatabaseManager::instance().addSubtask(taskId, title.trimmed());
+                if (!m_model->isExpanded(taskId)) {
+                    m_model->toggleExpand(taskId);
+                } else {
+                    m_model->refresh();
+                }
+            }
         }
     });
 }
@@ -308,6 +357,31 @@ void TaskPane::onTaskClicked(const QModelIndex &index)
     option.rect = m_listView->visualRect(index);
     option.font = m_listView->font();
 
+    bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
+
+    // SubTask: check if checkbox was clicked
+    if (isSubTask) {
+        QRect checkRect = TaskCardDelegate::subtaskCheckboxRect(option);
+        if (checkRect.contains(clickPos)) {
+            int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
+            bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
+            DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
+            m_model->refresh();
+        }
+        return;
+    }
+
+    // Main task: check expand icon
+    bool hasSubTasks = index.data(TaskListModel::HasSubTasksRole).toBool();
+    if (hasSubTasks) {
+        QRect expandRect = TaskCardDelegate::expandIconRect(option, index);
+        if (expandRect.contains(clickPos)) {
+            int taskId = m_model->taskIdAt(index.row());
+            m_model->toggleExpand(taskId);
+            return;
+        }
+    }
+
     // Check if the click hit the priority badge
     QRect badgeRect = TaskCardDelegate::priorityBadgeRect(option, index);
     if (badgeRect.contains(clickPos)) {
@@ -323,7 +397,20 @@ void TaskPane::onTaskClicked(const QModelIndex &index)
     }
 
     int taskId = m_model->taskIdAt(index.row());
+    m_model->setActiveTaskId(taskId);
+    m_listView->viewport()->update();
     emit taskSelected(taskId);
+}
+
+void TaskPane::onTaskDoubleClicked(const QModelIndex &index)
+{
+    bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
+    if (isSubTask) return;
+
+    int taskId = m_model->taskIdAt(index.row());
+    if (taskId > 0) {
+        m_model->toggleExpand(taskId);
+    }
 }
 
 void TaskPane::showPriorityPopup(const QModelIndex &index, const QPoint &globalPos)
