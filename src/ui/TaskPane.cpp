@@ -369,6 +369,22 @@ void TaskPane::showSearchResults(const QString &query, const QList<SearchResult>
     syncSelectionToActiveTarget();
 }
 
+void TaskPane::clearSearchResults()
+{
+    m_showingSearchResults = false;
+    m_currentSearchQuery.clear();
+
+    if (m_showingDeleted) {
+        m_model->loadDeletedTasks();
+    } else {
+        const TaskStatus status = m_showingArchived ? TaskStatus::Archived : TaskStatus::Active;
+        m_model->loadTasks(m_currentProductId, status);
+    }
+
+    m_titleLabel->setText("Tasks");
+    syncSelectionToActiveTarget();
+}
+
 void TaskPane::refreshCurrentView()
 {
     if (m_showingSearchResults && !m_currentSearchQuery.isEmpty()) {

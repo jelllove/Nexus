@@ -18,10 +18,13 @@ public:
     void loadTasks(int productId);
     void showArchived(bool archived);
     void showSearchResults(const QString &query, const QList<SearchResult> &results);
+    void clearSearchResults();
     void refreshCurrentView();
     void setActiveTarget(const EditorTarget &target);
     EditorTarget activeTarget() const;
     bool containsTarget(const EditorTarget &target) const;
+    bool isShowingSearchResults() const { return m_showingSearchResults; }
+    QString currentSearchQuery() const { return m_currentSearchQuery; }
     int selectedTaskId() const;
 
 signals:

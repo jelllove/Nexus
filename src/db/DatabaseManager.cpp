@@ -291,14 +291,6 @@ bool DatabaseManager::createFtsTables()
     }
 
     if (!query.exec(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS subtasks_fts USING fts5("
-        "  title, content, content=subtasks, content_rowid=id"
-        ")")) {
-        qWarning() << "Failed to create subtask FTS table (FTS5 may not be available):" << query.lastError().text();
-        return true;
-    }
-
-    if (!query.exec(
         "CREATE TRIGGER IF NOT EXISTS tasks_ai AFTER INSERT ON tasks BEGIN "
         "  INSERT INTO tasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
         "END")) {
@@ -320,6 +312,19 @@ bool DatabaseManager::createFtsTables()
         qCritical() << "Failed to create tasks_au trigger:" << query.lastError().text();
         return false;
     }
+    if (!hadTasksFts && !query.exec("INSERT INTO tasks_fts(tasks_fts) VALUES ('rebuild')")) {
+        qCritical() << "Failed to rebuild tasks FTS index:" << query.lastError().text();
+        return false;
+    }
+
+    if (!query.exec(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS subtasks_fts USING fts5("
+        "  title, content, content=subtasks, content_rowid=id"
+        ")")) {
+        qWarning() << "Failed to create subtask FTS table (FTS5 may not be available):" << query.lastError().text();
+        return true;
+    }
+
     if (!query.exec(
         "CREATE TRIGGER IF NOT EXISTS subtasks_ai AFTER INSERT ON subtasks BEGIN "
         "  INSERT INTO subtasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
@@ -340,11 +345,6 @@ bool DatabaseManager::createFtsTables()
         "  INSERT INTO subtasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
         "END")) {
         qCritical() << "Failed to create subtasks_au trigger:" << query.lastError().text();
-        return false;
-    }
-
-    if (!hadTasksFts && !query.exec("INSERT INTO tasks_fts(tasks_fts) VALUES ('rebuild')")) {
-        qCritical() << "Failed to rebuild tasks FTS index:" << query.lastError().text();
         return false;
     }
 

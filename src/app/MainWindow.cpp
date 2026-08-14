@@ -255,8 +255,7 @@ void MainWindow::onSearchRequested(const QString &query)
 
 void MainWindow::onSearchCleared()
 {
-    int productId = m_productPane->selectedProductId();
-    m_taskPane->loadTasks(productId > 0 ? productId : -1);
+    m_taskPane->clearSearchResults();
 
     const EditorTarget currentTarget = m_editorPane->currentTarget();
     if (m_taskPane->containsTarget(currentTarget)) {
@@ -415,7 +414,9 @@ void MainWindow::refreshTaskPaneForCurrentContext(const EditorTarget &preferredT
     const EditorTarget target = preferredTarget.isValid()
         ? preferredTarget
         : m_editorPane->currentTarget();
-    const QString query = m_searchBar->searchText();
+    const QString query = m_taskPane->isShowingSearchResults()
+        ? m_taskPane->currentSearchQuery()
+        : QString();
 
     if (!query.isEmpty()) {
         m_taskPane->showSearchResults(query, DatabaseManager::instance().searchItems(query));
