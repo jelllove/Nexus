@@ -217,9 +217,16 @@ void TaskPane::setupContextMenu()
         }
 
         int taskId = m_model->taskIdAt(index.row());
+        const QString rowStatus = index.data(TaskListModel::StatusRole).toString();
+        const bool isDeletedTask = m_showingSearchResults
+            ? (rowStatus == "deleted")
+            : m_showingDeleted;
+        const bool isArchivedTask = m_showingSearchResults
+            ? (rowStatus == "archived")
+            : (m_model->currentStatus() == TaskStatus::Archived);
 
         // Deleted tasks have a simplified context menu
-        if (m_showingDeleted) {
+        if (isDeletedTask) {
             QAction *restoreAction = menu.addAction("Restore");
             menu.addSeparator();
             QAction *permDeleteAction = menu.addAction("Permanently Delete");
@@ -227,7 +234,8 @@ void TaskPane::setupContextMenu()
             QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
             if (selected == restoreAction) {
                 DatabaseManager::instance().restoreTask(taskId);
-                m_model->loadDeletedTasks();
+                refreshCurrentView();
+                setActiveTarget(EditorTarget());
                 emit itemSelected(EditorTarget());
             } else if (selected == permDeleteAction) {
                 auto result = QMessageBox::warning(this, "Permanently Delete",
@@ -235,7 +243,8 @@ void TaskPane::setupContextMenu()
                     QMessageBox::Yes | QMessageBox::No);
                 if (result == QMessageBox::Yes) {
                     DatabaseManager::instance().permanentlyDeleteTask(taskId);
-                    m_model->loadDeletedTasks();
+                    refreshCurrentView();
+                    setActiveTarget(EditorTarget());
                     emit itemSelected(EditorTarget());
                 }
             }
@@ -285,9 +294,8 @@ void TaskPane::setupContextMenu()
         QAction *addSubTaskAction = menu.addAction("Add Sub Task...");
 
         // Archive/Reactivate
-        bool isArchived = (m_model->currentStatus() == TaskStatus::Archived);
         QAction *archiveAction = nullptr;
-        if (isArchived) {
+        if (isArchivedTask) {
             archiveAction = menu.addAction("Reactivate");
         } else {
             archiveAction = menu.addAction("Archive");
@@ -329,7 +337,7 @@ void TaskPane::setupContextMenu()
         }
 
         if (selected == archiveAction) {
-            if (isArchived) {
+            if (isArchivedTask) {
                 onReactivateTask();
             } else {
                 onArchiveTask();

@@ -37,6 +37,7 @@ private slots:
     void onImageInsertRequested();
 
 private:
+    bool saveCurrentContent();
     void setupUi();
 
     QWebEngineView *m_webView;

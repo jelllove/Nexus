@@ -113,7 +113,10 @@ void EditorPane::setupUi()
 void EditorPane::loadItem(const EditorTarget &target)
 {
     if (m_currentTarget.isValid() && m_autoSaveTimer->isActive()) {
-        onAutoSave();
+        m_autoSaveTimer->stop();
+        if (!saveCurrentContent()) {
+            return;
+        }
     }
 
     if (!target.isValid()) {
@@ -225,8 +228,13 @@ void EditorPane::onEditorReady()
 
 void EditorPane::onAutoSave()
 {
+    saveCurrentContent();
+}
+
+bool EditorPane::saveCurrentContent()
+{
     if (!m_currentTarget.isValid()) {
-        return;
+        return true;
     }
 
     const QString content = m_bridge->content();
@@ -248,7 +256,7 @@ void EditorPane::onAutoSave()
 
     if (!contentSaved || !historySaved) {
         emit saveFailed(QStringLiteral("Failed to save the item note."));
-        return;
+        return false;
     }
 
     emit contentChanged(m_currentTarget, content);
@@ -262,6 +270,8 @@ void EditorPane::onAutoSave()
             emit autoGenerateTitleRequested(m_currentTarget, content);
         }
     }
+
+    return true;
 }
 
 void EditorPane::onImageInsertRequested()
