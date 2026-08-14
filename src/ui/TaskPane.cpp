@@ -507,7 +507,6 @@ void TaskPane::handleItemClick(const QModelIndex &index, const QPoint &viewportP
         if (m_showingSearchResults) {
             const EditorTarget target = EditorTarget::subtask(
                 index.data(TaskListModel::SubTaskIdRole).toInt());
-            setActiveTarget(target);
             emit itemSelected(target);
             return;
         }
@@ -523,7 +522,6 @@ void TaskPane::handleItemClick(const QModelIndex &index, const QPoint &viewportP
 
         const EditorTarget target = EditorTarget::subtask(
             index.data(TaskListModel::SubTaskIdRole).toInt());
-        setActiveTarget(target);
         emit itemSelected(target);
         return;
     }
@@ -532,7 +530,6 @@ void TaskPane::handleItemClick(const QModelIndex &index, const QPoint &viewportP
 
     if (m_showingSearchResults) {
         const EditorTarget target = EditorTarget::task(taskId);
-        setActiveTarget(target);
         emit itemSelected(target);
         return;
     }
@@ -557,9 +554,7 @@ void TaskPane::handleItemClick(const QModelIndex &index, const QPoint &viewportP
         showWorkStatusPopup(index, QCursor::pos());
         return;
     }
-
     const EditorTarget target = EditorTarget::task(taskId);
-    setActiveTarget(target);
     emit itemSelected(target);
 }
 
@@ -784,7 +779,6 @@ void TaskPane::onAddTask()
     // Select the newly added task
     int row = m_model->rowForTaskId(newId);
     if (row >= 0) {
-        setActiveTarget(EditorTarget::task(newId));
         emit itemSelected(EditorTarget::task(newId));
     }
 }

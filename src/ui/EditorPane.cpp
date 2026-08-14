@@ -110,18 +110,18 @@ void EditorPane::setupUi()
     });
 }
 
-void EditorPane::loadItem(const EditorTarget &target)
+bool EditorPane::loadItem(const EditorTarget &target)
 {
     if (m_currentTarget.isValid() && (m_autoSaveTimer->isActive() || m_hasUnsavedChanges)) {
         m_autoSaveTimer->stop();
         if (!saveCurrentContent()) {
-            return;
+            return false;
         }
     }
 
     if (!target.isValid()) {
         clear();
-        return;
+        return true;
     }
 
     QString title;
@@ -133,7 +133,7 @@ void EditorPane::loadItem(const EditorTarget &target)
         const Task task = DatabaseManager::instance().getTask(target.id);
         if (task.id <= 0) {
             clear();
-            return;
+            return true;
         }
 
         title = task.title;
@@ -144,7 +144,7 @@ void EditorPane::loadItem(const EditorTarget &target)
         const SubTask subtask = DatabaseManager::instance().getSubtask(target.id);
         if (subtask.id <= 0) {
             clear();
-            return;
+            return true;
         }
 
         title = subtask.title;
@@ -153,7 +153,7 @@ void EditorPane::loadItem(const EditorTarget &target)
         updatedAt = subtask.updatedAt;
     } else {
         clear();
-        return;
+        return true;
     }
 
     m_currentTarget = target;
@@ -169,6 +169,7 @@ void EditorPane::loadItem(const EditorTarget &target)
         m_pendingTimestamp = timestamp;
     }
     m_hasUnsavedChanges = false;
+    return true;
 }
 
 void EditorPane::clear()

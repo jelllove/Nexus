@@ -17,7 +17,7 @@ class EditorPane : public QWidget
 public:
     explicit EditorPane(QWidget *parent = nullptr);
 
-    void loadItem(const EditorTarget &target);
+    bool loadItem(const EditorTarget &target);
     void clear();
     EditorTarget currentTarget() const { return m_currentTarget; }
     void resetTitleGenerationPending() { m_titleGenerationPending = false; }

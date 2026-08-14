@@ -221,15 +221,23 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::onProductSelected(int productId)
 {
+    if (!m_editorPane->loadItem(EditorTarget())) {
+        return;
+    }
+
     m_searchBar->clear();
     m_taskPane->loadTasks(productId);
     m_taskPane->setActiveTarget(EditorTarget());
-    m_editorPane->loadItem(EditorTarget());
 }
 
 void MainWindow::onItemSelected(const EditorTarget &target)
 {
-    m_editorPane->loadItem(target);
+    const EditorTarget previousTarget = m_editorPane->currentTarget();
+    if (m_editorPane->loadItem(target)) {
+        m_taskPane->setActiveTarget(target);
+    } else {
+        m_taskPane->setActiveTarget(previousTarget);
+    }
 }
 
 void MainWindow::onSearchRequested(const QString &query)
@@ -246,9 +254,14 @@ void MainWindow::onSearchRequested(const QString &query)
     if (m_taskPane->containsTarget(currentTarget)) {
         m_taskPane->setActiveTarget(currentTarget);
     } else {
-        m_taskPane->setActiveTarget(EditorTarget());
         if (currentTarget.isValid()) {
-            m_editorPane->loadItem(EditorTarget());
+            if (m_editorPane->loadItem(EditorTarget())) {
+                m_taskPane->setActiveTarget(EditorTarget());
+            } else {
+                m_taskPane->setActiveTarget(currentTarget);
+            }
+        } else {
+            m_taskPane->setActiveTarget(EditorTarget());
         }
     }
 }
@@ -261,9 +274,14 @@ void MainWindow::onSearchCleared()
     if (m_taskPane->containsTarget(currentTarget)) {
         m_taskPane->setActiveTarget(currentTarget);
     } else {
-        m_taskPane->setActiveTarget(EditorTarget());
         if (currentTarget.isValid()) {
-            m_editorPane->loadItem(EditorTarget());
+            if (m_editorPane->loadItem(EditorTarget())) {
+                m_taskPane->setActiveTarget(EditorTarget());
+            } else {
+                m_taskPane->setActiveTarget(currentTarget);
+            }
+        } else {
+            m_taskPane->setActiveTarget(EditorTarget());
         }
     }
 }
@@ -421,8 +439,7 @@ void MainWindow::refreshTaskPaneForCurrentContext(const EditorTarget &preferredT
     if (!query.isEmpty()) {
         m_taskPane->showSearchResults(query, DatabaseManager::instance().searchItems(query));
     } else {
-        const int productId = m_productPane->selectedProductId();
-        m_taskPane->loadTasks(productId > 0 ? productId : -1);
+        m_taskPane->refreshCurrentView();
     }
 
     if (m_taskPane->containsTarget(target)) {
@@ -430,9 +447,14 @@ void MainWindow::refreshTaskPaneForCurrentContext(const EditorTarget &preferredT
         return;
     }
 
-    m_taskPane->setActiveTarget(EditorTarget());
     if (target.isValid() && m_editorPane->currentTarget() == target) {
-        m_editorPane->loadItem(EditorTarget());
+        if (m_editorPane->loadItem(EditorTarget())) {
+            m_taskPane->setActiveTarget(EditorTarget());
+        } else {
+            m_taskPane->setActiveTarget(target);
+        }
+    } else {
+        m_taskPane->setActiveTarget(EditorTarget());
     }
 }
 
