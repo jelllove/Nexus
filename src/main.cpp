@@ -4,7 +4,8 @@
 #include <QSettings>
 #include <QLocalServer>
 #include <QLocalSocket>
-#include <QtWebEngineWidgets/QWebEngineView>
+#include <QMessageBox>
+#include <cstdlib>
 #include "app/MainWindow.h"
 #include "db/DatabaseManager.h"
 
@@ -41,7 +42,11 @@ int main(int argc, char *argv[])
     // Initialize database (use custom path from QSettings if set)
     QSettings settings;
     QString dbPath = settings.value("db_path").toString();
-    DatabaseManager::instance().initialize(dbPath.isEmpty() ? QString() : dbPath);
+    if (!DatabaseManager::instance().initialize(dbPath.isEmpty() ? QString() : dbPath)) {
+        QMessageBox::critical(nullptr, "Nexus",
+                              "Nexus could not initialize its database.");
+        return EXIT_FAILURE;
+    }
 
     // Daily automatic backup
     DatabaseManager::instance().backupDatabase();

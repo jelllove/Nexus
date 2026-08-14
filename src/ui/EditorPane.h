@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QTimer>
 #include "editor/EditorBridge.h"
+#include "models/EditorTarget.h"
 
 class EditorPane : public QWidget
 {
@@ -16,16 +17,18 @@ class EditorPane : public QWidget
 public:
     explicit EditorPane(QWidget *parent = nullptr);
 
-    void loadTask(int taskId);
+    void loadItem(const EditorTarget &target);
     void clear();
+    EditorTarget currentTarget() const { return m_currentTarget; }
     void resetTitleGenerationPending() { m_titleGenerationPending = false; }
 
 signals:
-    void contentChanged(int taskId, const QString &content);
-    void titleChanged(int taskId, const QString &title);
-    void generateTitleRequested(int taskId, const QString &content);
-    void summarizeRequested(int taskId, const QString &content);
-    void autoGenerateTitleRequested(int taskId, const QString &content);
+    void contentChanged(const EditorTarget &target, const QString &content);
+    void titleChanged(const EditorTarget &target, const QString &title);
+    void generateTitleRequested(const EditorTarget &target, const QString &content);
+    void summarizeRequested(const EditorTarget &target, const QString &content);
+    void autoGenerateTitleRequested(const EditorTarget &target, const QString &content);
+    void saveFailed(const QString &message);
 
 private slots:
     void onEditorContentChanged(const QString &content);
@@ -41,7 +44,7 @@ private:
     EditorBridge *m_bridge;
     QTimer *m_autoSaveTimer;
 
-    int m_currentTaskId = -1;
+    EditorTarget m_currentTarget;
     bool m_editorReady = false;
     QString m_pendingContent;
     QString m_pendingTitle;

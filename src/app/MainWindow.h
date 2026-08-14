@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <QSystemTrayIcon>
 #include <QSplitter>
+#include "models/EditorTarget.h"
 #include "ui/ProductPane.h"
 #include "ui/TaskPane.h"
 #include "ui/EditorPane.h"
@@ -23,15 +24,15 @@ protected:
 
 private slots:
     void onProductSelected(int productId);
-    void onTaskSelected(int taskId);
-    void onTaskTitleChanged(int taskId, const QString &title);
+    void onItemSelected(const EditorTarget &target);
+    void onItemTitleChanged(const EditorTarget &target, const QString &title);
     void onSearchRequested(const QString &query);
     void onSearchCleared();
     void onHotkeyPressed();
     void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
-    void onGenerateTitleRequested(int taskId, const QString &content);
+    void onGenerateTitleRequested(const EditorTarget &target, const QString &content);
     void onTitleGenerated(const QString &title);
-    void onSummarizeRequested(int taskId, const QString &content);
+    void onSummarizeRequested(const EditorTarget &target, const QString &content);
     void onSummaryGenerated(const QString &summary);
     void onAIError(const QString &message);
     void showSettings();
@@ -46,6 +47,7 @@ private:
     void setupMenuBar();
     void toggleVisibility();
     void checkForUpdates();
+    void refreshTaskPaneForCurrentContext(const EditorTarget &preferredTarget = EditorTarget());
 
     // UI components
     QSplitter *m_splitter;
@@ -58,6 +60,6 @@ private:
     QSystemTrayIcon *m_trayIcon;
 
     // State
-    int m_currentTaskIdForTitle = -1;
-    int m_currentTaskIdForSummary = -1;
+    EditorTarget m_titleTarget;
+    EditorTarget m_summaryTarget;
 };

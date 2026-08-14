@@ -1,11 +1,44 @@
 #include "EditorPane.h"
+
 #include "db/DatabaseManager.h"
 #include "services/ImageManager.h"
-#include <QFileDialog>
-#include <QUrl>
+
 #include <QDesktopServices>
-#include <QWebEnginePage>
+#include <QFileDialog>
 #include <QRegularExpression>
+#include <QUrl>
+#include <QWebEnginePage>
+
+namespace {
+QString toJavaScriptStringLiteral(const QString &value)
+{
+    QString escaped = value;
+    escaped.replace("\\", "\\\\");
+    escaped.replace("'", "\\'");
+    escaped.replace("\r", "\\r");
+    escaped.replace("\n", "\\n");
+    escaped.replace(QChar(0x2028), "\\u2028");
+    escaped.replace(QChar(0x2029), "\\u2029");
+    return QStringLiteral("'%1'").arg(escaped);
+}
+
+void setEditorMetadata(QWebEngineView *webView, const QString &functionName, const QString &value)
+{
+    webView->page()->runJavaScript(
+        QStringLiteral("window.%1(%2)")
+            .arg(functionName, toJavaScriptStringLiteral(value)));
+}
+
+QString displayTimestamp(const QDateTime &createdAt, const QDateTime &updatedAt)
+{
+    const QDateTime effectiveTime = updatedAt.isValid() ? updatedAt : createdAt;
+    if (!effectiveTime.isValid()) {
+        return QString();
+    }
+
+    return effectiveTime.toString(QStringLiteral("dddd, MMMM d, yyyy    h:mm AP"));
+}
+}
 
 // Custom page that intercepts link clicks and opens them externally
 class EditorWebPage : public QWebEnginePage
@@ -59,7 +92,6 @@ void EditorPane::setupUi()
 
     layout->addWidget(m_webView, 1);
 
-    // Connect bridge signals
     connect(m_bridge, &EditorBridge::contentChanged,
             this, &EditorPane::onEditorContentChanged);
     connect(m_bridge, &EditorBridge::editorReady,
@@ -67,50 +99,66 @@ void EditorPane::setupUi()
     connect(m_bridge, &EditorBridge::imageInsertRequested,
             this, &EditorPane::onImageInsertRequested);
     connect(m_bridge, &EditorBridge::generateTitleRequested, this, [this]() {
-        if (m_currentTaskId > 0) {
-            emit generateTitleRequested(m_currentTaskId, m_bridge->content());
+        if (m_currentTarget.isValid()) {
+            emit generateTitleRequested(m_currentTarget, m_bridge->content());
         }
     });
     connect(m_bridge, &EditorBridge::summarizeRequested, this, [this]() {
-        if (m_currentTaskId > 0) {
-            emit summarizeRequested(m_currentTaskId, m_bridge->content());
+        if (m_currentTarget.isValid()) {
+            emit summarizeRequested(m_currentTarget, m_bridge->content());
         }
     });
 }
 
-void EditorPane::loadTask(int taskId)
+void EditorPane::loadItem(const EditorTarget &target)
 {
-    // Save current task before switching
-    if (m_currentTaskId > 0 && m_autoSaveTimer->isActive()) {
+    if (m_currentTarget.isValid() && m_autoSaveTimer->isActive()) {
         onAutoSave();
     }
 
-    m_currentTaskId = taskId;
-
-    if (taskId <= 0) {
+    if (!target.isValid()) {
         clear();
         return;
     }
 
-    Task task = DatabaseManager::instance().getTask(taskId);
+    QString title;
+    QString content;
+    QDateTime createdAt;
+    QDateTime updatedAt;
 
-    QString title = task.title;
-    QString content = task.content;
-    QString timestamp;
-    if (task.updatedAt.isValid()) {
-        timestamp = task.updatedAt.toString("dddd, MMMM d, yyyy    h:mm AP");
-    } else if (task.createdAt.isValid()) {
-        timestamp = task.createdAt.toString("dddd, MMMM d, yyyy    h:mm AP");
+    if (target.kind == EditorTargetKind::Task) {
+        const Task task = DatabaseManager::instance().getTask(target.id);
+        if (task.id <= 0) {
+            clear();
+            return;
+        }
+
+        title = task.title;
+        content = task.content;
+        createdAt = task.createdAt;
+        updatedAt = task.updatedAt;
+    } else if (target.kind == EditorTargetKind::SubTask) {
+        const SubTask subtask = DatabaseManager::instance().getSubtask(target.id);
+        if (subtask.id <= 0) {
+            clear();
+            return;
+        }
+
+        title = subtask.title;
+        content = subtask.content;
+        createdAt = subtask.createdAt;
+        updatedAt = subtask.updatedAt;
+    } else {
+        clear();
+        return;
     }
 
+    m_currentTarget = target;
+    const QString timestamp = displayTimestamp(createdAt, updatedAt);
+
     if (m_editorReady) {
-        // Set title and timestamp via JS
-        QString escapedTitle = title;
-        escapedTitle.replace("'", "\\'");
-        m_webView->page()->runJavaScript(
-            QString("window.setPageTitle('%1')").arg(escapedTitle));
-        m_webView->page()->runJavaScript(
-            QString("window.setPageTimestamp('%1')").arg(timestamp));
+        setEditorMetadata(m_webView, QStringLiteral("setPageTitle"), title);
+        setEditorMetadata(m_webView, QStringLiteral("setPageTimestamp"), timestamp);
         m_bridge->loadContent(content);
     } else {
         m_pendingContent = content;
@@ -121,42 +169,53 @@ void EditorPane::loadTask(int taskId)
 
 void EditorPane::clear()
 {
-    m_currentTaskId = -1;
+    m_autoSaveTimer->stop();
+    m_currentTarget = EditorTarget();
+    m_pendingContent.clear();
+    m_pendingTitle.clear();
+    m_pendingTimestamp.clear();
+
     if (m_editorReady) {
-        m_webView->page()->runJavaScript("window.setPageTitle('')");
-        m_webView->page()->runJavaScript("window.setPageTimestamp('')");
-        m_bridge->loadContent("");
+        setEditorMetadata(m_webView, QStringLiteral("setPageTitle"), QString());
+        setEditorMetadata(m_webView, QStringLiteral("setPageTimestamp"), QString());
+        m_bridge->loadContent(QString());
     }
 }
 
 void EditorPane::onEditorContentChanged(const QString &content)
 {
-    if (m_currentTaskId <= 0) return;
-
-    // Check if this is a title change from the page title field
-    if (content.startsWith("__TITLE__:")) {
-        QString newTitle = content.mid(10);
-        if (!newTitle.isEmpty()) {
-            DatabaseManager::instance().updateTaskTitle(m_currentTaskId, newTitle);
-            emit titleChanged(m_currentTaskId, newTitle);
-        }
+    if (!m_currentTarget.isValid()) {
         return;
     }
 
-    // Restart auto-save timer
+    if (content.startsWith(QStringLiteral("__TITLE__:"))) {
+        const QString newTitle = content.mid(10);
+
+        bool saved = false;
+        if (m_currentTarget.kind == EditorTargetKind::Task) {
+            saved = DatabaseManager::instance().updateTaskTitle(m_currentTarget.id, newTitle);
+        } else if (m_currentTarget.kind == EditorTargetKind::SubTask) {
+            saved = DatabaseManager::instance().updateSubtaskTitle(m_currentTarget.id, newTitle);
+        }
+
+        if (!saved) {
+            emit saveFailed(QStringLiteral("Failed to save the item title."));
+            return;
+        }
+
+        emit titleChanged(m_currentTarget, newTitle);
+        return;
+    }
+
     m_autoSaveTimer->start();
 }
 
 void EditorPane::onEditorReady()
 {
     m_editorReady = true;
-    if (!m_pendingTitle.isEmpty() || !m_pendingContent.isEmpty()) {
-        QString escapedTitle = m_pendingTitle;
-        escapedTitle.replace("'", "\\'");
-        m_webView->page()->runJavaScript(
-            QString("window.setPageTitle('%1')").arg(escapedTitle));
-        m_webView->page()->runJavaScript(
-            QString("window.setPageTimestamp('%1')").arg(m_pendingTimestamp));
+    if (!m_pendingTitle.isEmpty() || !m_pendingContent.isEmpty() || !m_pendingTimestamp.isEmpty()) {
+        setEditorMetadata(m_webView, QStringLiteral("setPageTitle"), m_pendingTitle);
+        setEditorMetadata(m_webView, QStringLiteral("setPageTimestamp"), m_pendingTimestamp);
         m_bridge->loadContent(m_pendingContent);
         m_pendingContent.clear();
         m_pendingTitle.clear();
@@ -166,29 +225,41 @@ void EditorPane::onEditorReady()
 
 void EditorPane::onAutoSave()
 {
-    if (m_currentTaskId <= 0) return;
+    if (!m_currentTarget.isValid()) {
+        return;
+    }
 
-    QString content = m_bridge->content();
+    const QString content = m_bridge->content();
+    auto &database = DatabaseManager::instance();
 
-    // Save to database
-    DatabaseManager::instance().updateTaskContent(m_currentTaskId, content);
+    bool contentSaved = false;
+    bool historySaved = false;
+    QString currentTitle;
 
-    // Save snapshot for undo history
-    DatabaseManager::instance().saveContentSnapshot(m_currentTaskId, content);
+    if (m_currentTarget.kind == EditorTargetKind::Task) {
+        contentSaved = database.updateTaskContent(m_currentTarget.id, content);
+        historySaved = database.saveContentSnapshot(m_currentTarget.id, content);
+        currentTitle = database.getTask(m_currentTarget.id).title;
+    } else if (m_currentTarget.kind == EditorTargetKind::SubTask) {
+        contentSaved = database.updateSubtaskContent(m_currentTarget.id, content);
+        historySaved = database.saveSubtaskContentSnapshot(m_currentTarget.id, content);
+        currentTitle = database.getSubtask(m_currentTarget.id).title;
+    }
 
-    emit contentChanged(m_currentTaskId, content);
+    if (!contentSaved || !historySaved) {
+        emit saveFailed(QStringLiteral("Failed to save the item note."));
+        return;
+    }
 
-    // Auto-generate title if empty
-    if (!m_titleGenerationPending) {
-        Task task = DatabaseManager::instance().getTask(m_currentTaskId);
-        if (task.title.trimmed().isEmpty()) {
-            QString plain = content;
-            plain.remove(QRegularExpression("<[^>]*>"));
-            plain = plain.trimmed();
-            if (!plain.isEmpty()) {
-                m_titleGenerationPending = true;
-                emit autoGenerateTitleRequested(m_currentTaskId, content);
-            }
+    emit contentChanged(m_currentTarget, content);
+
+    if (!m_titleGenerationPending && currentTitle.trimmed().isEmpty()) {
+        QString plain = content;
+        plain.remove(QRegularExpression("<[^>]*>"));
+        plain = plain.trimmed();
+        if (!plain.isEmpty()) {
+            m_titleGenerationPending = true;
+            emit autoGenerateTitleRequested(m_currentTarget, content);
         }
     }
 }

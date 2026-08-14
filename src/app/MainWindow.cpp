@@ -89,8 +89,8 @@ void MainWindow::setupUi()
     // Connect signals
     connect(m_productPane, &ProductPane::productSelected,
             this, &MainWindow::onProductSelected);
-    connect(m_taskPane, &TaskPane::taskSelected,
-            this, &MainWindow::onTaskSelected);
+    connect(m_taskPane, &TaskPane::itemSelected,
+            this, &MainWindow::onItemSelected);
     connect(m_searchBar, &SearchBar::searchRequested,
             this, &MainWindow::onSearchRequested);
     connect(m_searchBar, &SearchBar::searchCleared,
@@ -100,9 +100,13 @@ void MainWindow::setupUi()
     connect(m_editorPane, &EditorPane::summarizeRequested,
             this, &MainWindow::onSummarizeRequested);
     connect(m_editorPane, &EditorPane::titleChanged,
-            this, &MainWindow::onTaskTitleChanged);
+            this, &MainWindow::onItemTitleChanged);
     connect(m_editorPane, &EditorPane::autoGenerateTitleRequested,
             this, &MainWindow::onGenerateTitleRequested);
+    connect(m_editorPane, &EditorPane::saveFailed, this, [this](const QString &message) {
+        statusBar()->showMessage(message, 5000);
+        QMessageBox::warning(this, "Nexus", message);
+    });
 }
 
 void MainWindow::setupMenuBar()
@@ -219,33 +223,49 @@ void MainWindow::onProductSelected(int productId)
 {
     m_searchBar->clear();
     m_taskPane->loadTasks(productId);
-    m_editorPane->clear();
+    m_taskPane->setActiveTarget(EditorTarget());
+    m_editorPane->loadItem(EditorTarget());
 }
 
-void MainWindow::onTaskSelected(int taskId)
+void MainWindow::onItemSelected(const EditorTarget &target)
 {
-    m_editorPane->loadTask(taskId);
+    m_editorPane->loadItem(target);
 }
 
 void MainWindow::onSearchRequested(const QString &query)
 {
-    auto results = DatabaseManager::instance().searchTasks(query);
+    const QList<SearchResult> results = DatabaseManager::instance().searchItems(query);
+    m_taskPane->showSearchResults(results);
     if (results.isEmpty()) {
         statusBar()->showMessage(QString("No results found for '%1'").arg(query), 3000);
     } else {
         statusBar()->showMessage(QString("Found %1 result(s)").arg(results.size()), 3000);
     }
-    // Show results in task pane
-    // We need to access the model directly through the task pane
-    // For now, show a message
+
+    const EditorTarget currentTarget = m_editorPane->currentTarget();
+    if (m_taskPane->containsTarget(currentTarget)) {
+        m_taskPane->setActiveTarget(currentTarget);
+    } else {
+        m_taskPane->setActiveTarget(EditorTarget());
+        if (currentTarget.isValid()) {
+            m_editorPane->loadItem(EditorTarget());
+        }
+    }
 }
 
 void MainWindow::onSearchCleared()
 {
-    // Reload current product's tasks
     int productId = m_productPane->selectedProductId();
-    if (productId > 0) {
-        m_taskPane->loadTasks(productId);
+    m_taskPane->loadTasks(productId > 0 ? productId : -1);
+
+    const EditorTarget currentTarget = m_editorPane->currentTarget();
+    if (m_taskPane->containsTarget(currentTarget)) {
+        m_taskPane->setActiveTarget(currentTarget);
+    } else {
+        m_taskPane->setActiveTarget(EditorTarget());
+        if (currentTarget.isValid()) {
+            m_editorPane->loadItem(EditorTarget());
+        }
     }
 }
 
@@ -276,39 +296,50 @@ void MainWindow::toggleVisibility()
     }
 }
 
-void MainWindow::onTaskTitleChanged(int taskId, const QString &title)
+void MainWindow::onItemTitleChanged(const EditorTarget &target, const QString &title)
 {
-    Q_UNUSED(taskId);
     Q_UNUSED(title);
-    // Refresh task list to show updated title
-    int productId = m_productPane->selectedProductId();
-    if (productId > 0) {
-        m_taskPane->loadTasks(productId);
-    }
+    refreshTaskPaneForCurrentContext(target);
 }
 
-void MainWindow::onGenerateTitleRequested(int taskId, const QString &content)
+void MainWindow::onGenerateTitleRequested(const EditorTarget &target, const QString &content)
 {
-    m_currentTaskIdForTitle = taskId;
+    if (!target.isValid()) {
+        return;
+    }
+
+    m_titleTarget = target;
     statusBar()->showMessage("Generating title with AI...");
     AIService::instance().generateTitle(content);
 }
 
 void MainWindow::onTitleGenerated(const QString &title)
 {
-    if (m_currentTaskIdForTitle > 0) {
-        DatabaseManager::instance().updateTaskTitle(m_currentTaskIdForTitle, title);
-        statusBar()->showMessage(QString("Title updated: %1").arg(title), 5000);
-        // Refresh task list
-        int productId = m_productPane->selectedProductId();
-        if (productId > 0) {
-            m_taskPane->loadTasks(productId);
-        }
-        // Reload editor to show new title
-        m_editorPane->loadTask(m_currentTaskIdForTitle);
+    if (!m_titleTarget.isValid()) {
+        m_editorPane->resetTitleGenerationPending();
+        return;
     }
+
+    bool saved = false;
+    if (m_titleTarget.kind == EditorTargetKind::Task) {
+        saved = DatabaseManager::instance().updateTaskTitle(m_titleTarget.id, title);
+    } else if (m_titleTarget.kind == EditorTargetKind::SubTask) {
+        saved = DatabaseManager::instance().updateSubtaskTitle(m_titleTarget.id, title);
+    }
+
+    if (!saved) {
+        onAIError("The generated title could not be saved.");
+        return;
+    }
+
+    statusBar()->showMessage(QString("Title updated: %1").arg(title), 5000);
+    refreshTaskPaneForCurrentContext(m_titleTarget);
+    if (m_editorPane->currentTarget() == m_titleTarget) {
+        m_editorPane->loadItem(m_titleTarget);
+    }
+
     m_editorPane->resetTitleGenerationPending();
-    m_currentTaskIdForTitle = -1;
+    m_titleTarget = EditorTarget();
 }
 
 void MainWindow::onAIError(const QString &message)
@@ -316,32 +347,92 @@ void MainWindow::onAIError(const QString &message)
     statusBar()->showMessage("AI Error: " + message, 5000);
     QMessageBox::warning(this, "AI Error", message);
     m_editorPane->resetTitleGenerationPending();
-    m_currentTaskIdForTitle = -1;
-    m_currentTaskIdForSummary = -1;
+    m_titleTarget = EditorTarget();
+    m_summaryTarget = EditorTarget();
 }
 
-void MainWindow::onSummarizeRequested(int taskId, const QString &content)
+void MainWindow::onSummarizeRequested(const EditorTarget &target, const QString &content)
 {
-    m_currentTaskIdForSummary = taskId;
+    if (!target.isValid()) {
+        return;
+    }
+
+    m_summaryTarget = target;
     statusBar()->showMessage("Summarizing content with AI...");
     AIService::instance().summarizeContent(content);
 }
 
 void MainWindow::onSummaryGenerated(const QString &summary)
 {
-    if (m_currentTaskIdForSummary > 0) {
-        // Append summary to existing content as a styled block
-        Task task = DatabaseManager::instance().getTask(m_currentTaskIdForSummary);
-        QString summaryHtml = QString(
-            "<hr><blockquote><p><strong>AI Summary</strong></p><p>%1</p></blockquote>"
-        ).arg(summary.toHtmlEscaped().replace("\n", "</p><p>"));
-
-        QString newContent = task.content + summaryHtml;
-        DatabaseManager::instance().updateTaskContent(m_currentTaskIdForSummary, newContent);
-        m_editorPane->loadTask(m_currentTaskIdForSummary);
-        statusBar()->showMessage("Summary added.", 5000);
+    if (!m_summaryTarget.isValid()) {
+        return;
     }
-    m_currentTaskIdForSummary = -1;
+
+    QString existingContent;
+    if (m_summaryTarget.kind == EditorTargetKind::Task) {
+        const Task task = DatabaseManager::instance().getTask(m_summaryTarget.id);
+        if (task.id <= 0) {
+            onAIError("The summarized item could not be reloaded.");
+            return;
+        }
+        existingContent = task.content;
+    } else if (m_summaryTarget.kind == EditorTargetKind::SubTask) {
+        const SubTask subtask = DatabaseManager::instance().getSubtask(m_summaryTarget.id);
+        if (subtask.id <= 0) {
+            onAIError("The summarized item could not be reloaded.");
+            return;
+        }
+        existingContent = subtask.content;
+    }
+
+    const QString summaryHtml = QString(
+        "<hr><blockquote><p><strong>AI Summary</strong></p><p>%1</p></blockquote>"
+    ).arg(summary.toHtmlEscaped().replace("\n", "</p><p>"));
+    const QString newContent = existingContent + summaryHtml;
+
+    bool saved = false;
+    if (m_summaryTarget.kind == EditorTargetKind::Task) {
+        saved = DatabaseManager::instance().updateTaskContent(m_summaryTarget.id, newContent);
+    } else if (m_summaryTarget.kind == EditorTargetKind::SubTask) {
+        saved = DatabaseManager::instance().updateSubtaskContent(m_summaryTarget.id, newContent);
+    }
+
+    if (!saved) {
+        onAIError("The generated summary could not be saved.");
+        return;
+    }
+
+    refreshTaskPaneForCurrentContext(m_summaryTarget);
+    if (m_editorPane->currentTarget() == m_summaryTarget) {
+        m_editorPane->loadItem(m_summaryTarget);
+    }
+    statusBar()->showMessage("Summary added.", 5000);
+    m_summaryTarget = EditorTarget();
+}
+
+void MainWindow::refreshTaskPaneForCurrentContext(const EditorTarget &preferredTarget)
+{
+    const EditorTarget target = preferredTarget.isValid()
+        ? preferredTarget
+        : m_editorPane->currentTarget();
+    const QString query = m_searchBar->searchText();
+
+    if (!query.isEmpty()) {
+        m_taskPane->showSearchResults(DatabaseManager::instance().searchItems(query));
+    } else {
+        const int productId = m_productPane->selectedProductId();
+        m_taskPane->loadTasks(productId > 0 ? productId : -1);
+    }
+
+    if (m_taskPane->containsTarget(target)) {
+        m_taskPane->setActiveTarget(target);
+        return;
+    }
+
+    m_taskPane->setActiveTarget(EditorTarget());
+    if (target.isValid() && m_editorPane->currentTarget() == target) {
+        m_editorPane->loadItem(EditorTarget());
+    }
 }
 
 void MainWindow::showSettings()
