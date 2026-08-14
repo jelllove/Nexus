@@ -16,6 +16,7 @@ public:
 
     void loadProducts();
     int selectedProductId() const;
+    void setSelectedProduct(int productId);
 
 signals:
     void productSelected(int productId);

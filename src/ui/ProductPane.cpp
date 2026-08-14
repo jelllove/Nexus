@@ -87,6 +87,20 @@ int ProductPane::selectedProductId() const
     return m_model->productIdAt(index.row());
 }
 
+void ProductPane::setSelectedProduct(int productId)
+{
+    if (productId <= 0) {
+        m_listView->clearSelection();
+        m_listView->setCurrentIndex(QModelIndex());
+        return;
+    }
+
+    const int row = m_model->rowForProductId(productId);
+    if (row >= 0) {
+        m_listView->setCurrentIndex(m_model->index(row, 0));
+    }
+}
+
 void ProductPane::onProductClicked(const QModelIndex &index)
 {
     int productId = m_model->productIdAt(index.row());

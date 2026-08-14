@@ -221,7 +221,9 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::onProductSelected(int productId)
 {
+    const int previousProductId = m_taskPane->currentProductId();
     if (!m_editorPane->loadItem(EditorTarget())) {
+        m_productPane->setSelectedProduct(previousProductId);
         return;
     }
 
@@ -243,6 +245,26 @@ void MainWindow::onItemSelected(const EditorTarget &target)
 void MainWindow::onSearchRequested(const QString &query)
 {
     const QList<SearchResult> results = DatabaseManager::instance().searchItems(query);
+    const EditorTarget currentTarget = m_editorPane->currentTarget();
+
+    bool currentTargetVisible = false;
+    for (const SearchResult &result : results) {
+        if (result.target() == currentTarget) {
+            currentTargetVisible = true;
+            break;
+        }
+        if (currentTarget.kind == EditorTargetKind::Task
+            && result.parentTask.id == currentTarget.id) {
+            currentTargetVisible = true;
+            break;
+        }
+    }
+
+    if (!currentTargetVisible && currentTarget.isValid()
+        && !m_editorPane->loadItem(EditorTarget())) {
+        return;
+    }
+
     m_taskPane->showSearchResults(query, results);
     if (results.isEmpty()) {
         statusBar()->showMessage(QString("No results found for '%1'").arg(query), 3000);
@@ -250,27 +272,23 @@ void MainWindow::onSearchRequested(const QString &query)
         statusBar()->showMessage(QString("Found %1 result(s)").arg(results.size()), 3000);
     }
 
-    const EditorTarget currentTarget = m_editorPane->currentTarget();
-    if (m_taskPane->containsTarget(currentTarget)) {
+    if (currentTargetVisible && m_taskPane->containsTarget(currentTarget)) {
         m_taskPane->setActiveTarget(currentTarget);
     } else {
-        if (currentTarget.isValid()) {
-            if (m_editorPane->loadItem(EditorTarget())) {
-                m_taskPane->setActiveTarget(EditorTarget());
-            } else {
-                m_taskPane->setActiveTarget(currentTarget);
-            }
-        } else {
-            m_taskPane->setActiveTarget(EditorTarget());
-        }
+        m_taskPane->setActiveTarget(EditorTarget());
     }
 }
 
 void MainWindow::onSearchCleared()
 {
+    const EditorTarget currentTarget = m_editorPane->currentTarget();
+    const QString previousQuery = m_taskPane->currentSearchQuery();
+    const QList<SearchResult> previousResults = previousQuery.isEmpty()
+        ? QList<SearchResult>()
+        : DatabaseManager::instance().searchItems(previousQuery);
+
     m_taskPane->clearSearchResults();
 
-    const EditorTarget currentTarget = m_editorPane->currentTarget();
     if (m_taskPane->containsTarget(currentTarget)) {
         m_taskPane->setActiveTarget(currentTarget);
     } else {
@@ -278,6 +296,9 @@ void MainWindow::onSearchCleared()
             if (m_editorPane->loadItem(EditorTarget())) {
                 m_taskPane->setActiveTarget(EditorTarget());
             } else {
+                if (!previousQuery.isEmpty()) {
+                    m_taskPane->showSearchResults(previousQuery, previousResults);
+                }
                 m_taskPane->setActiveTarget(currentTarget);
             }
         } else {

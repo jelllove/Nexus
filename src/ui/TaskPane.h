@@ -25,6 +25,7 @@ public:
     bool containsTarget(const EditorTarget &target) const;
     bool isShowingSearchResults() const { return m_showingSearchResults; }
     QString currentSearchQuery() const { return m_currentSearchQuery; }
+    int currentProductId() const { return m_currentProductId; }
     int selectedTaskId() const;
 
 signals:
