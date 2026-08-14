@@ -4,6 +4,7 @@
 #include <QSqlDatabase>
 #include <QList>
 #include "models/Product.h"
+#include "models/SearchResult.h"
 #include "models/Task.h"
 
 class DatabaseManager : public QObject
@@ -68,7 +69,7 @@ public:
     void cleanupOldSubtaskHistory(int subtaskId, int maxAgeMinutes = 60);
 
     // Search
-    QList<Task> searchTasks(const QString &query, int productId = -1);
+    QList<SearchResult> searchItems(const QString &query, int productId = -1);
 
     // Settings
     QString getSetting(const QString &key, const QString &defaultValue = QString());

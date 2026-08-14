@@ -3,6 +3,8 @@
 #include <QAbstractListModel>
 #include <QList>
 #include <QSet>
+#include "models/EditorTarget.h"
+#include "models/SearchResult.h"
 #include "models/Task.h"
 
 struct DisplayRow {
@@ -52,9 +54,11 @@ public:
 
     void loadTasks(int productId, TaskStatus status = TaskStatus::Active);
     void loadDeletedTasks();
-    void loadSearchResults(const QList<Task> &tasks);
+    void loadSearchResults(const QList<SearchResult> &results);
     int taskIdAt(int row) const;
     int rowForTaskId(int taskId) const;
+    EditorTarget targetAt(int row) const;
+    int rowForTarget(const EditorTarget &target) const;
     Task taskAt(int row) const;
     int addTask(int productId, const QString &title, TaskPriority priority = TaskPriority::Medium, const QDateTime &dueDate = QDateTime());
     void removeTask(int row);
@@ -63,8 +67,8 @@ public:
     void toggleExpand(int taskId);
     bool isExpanded(int taskId) const;
 
-    void setActiveTaskId(int taskId) { m_activeTaskId = taskId; }
-    int activeTaskId() const { return m_activeTaskId; }
+    void setActiveTarget(const EditorTarget &target) { m_activeTarget = target; }
+    EditorTarget activeTarget() const { return m_activeTarget; }
 
     int currentProductId() const { return m_currentProductId; }
     TaskStatus currentStatus() const { return m_currentStatus; }
@@ -75,7 +79,7 @@ private:
     QList<Task> m_tasks;
     QList<DisplayRow> m_displayRows;
     QSet<int> m_expandedTasks;
-    int m_activeTaskId = -1;
+    EditorTarget m_activeTarget;
     int m_currentProductId = -1;
     TaskStatus m_currentStatus = TaskStatus::Active;
 };

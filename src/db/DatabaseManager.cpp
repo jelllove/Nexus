@@ -26,6 +26,78 @@ bool tableHasColumn(QSqlDatabase &database, const QString &tableName, const QStr
 
     return false;
 }
+
+bool tableExists(QSqlDatabase &database, const QString &tableName)
+{
+    QSqlQuery query(database);
+    query.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?");
+    query.addBindValue(tableName);
+    if (!query.exec()) {
+        qCritical() << "Failed to inspect sqlite_master for" << tableName << ":" << query.lastError().text();
+        return false;
+    }
+
+    return query.next();
+}
+
+QString buildFtsMatchQuery(const QString &rawQuery)
+{
+    const QString simplified = rawQuery.simplified();
+    if (simplified.isEmpty()) {
+        return QString();
+    }
+
+    const QStringList tokens = simplified.split(' ', Qt::SkipEmptyParts);
+    QStringList escapedTokens;
+    escapedTokens.reserve(tokens.size());
+    for (QString token : tokens) {
+        token.replace(QStringLiteral("\""), QStringLiteral("\"\""));
+        escapedTokens.append(QStringLiteral("\"%1\"").arg(token));
+    }
+
+    return escapedTokens.join(QStringLiteral(" AND "));
+}
+
+Task taskFromSearchQuery(const QSqlQuery &query, int startColumn = 0)
+{
+    Task task;
+    task.id = query.value(startColumn + 0).toInt();
+    task.productId = query.value(startColumn + 1).toInt();
+    task.title = query.value(startColumn + 2).toString();
+    task.content = query.value(startColumn + 3).toString();
+    task.priority = static_cast<TaskPriority>(query.value(startColumn + 4).toInt());
+
+    const QString status = query.value(startColumn + 5).toString();
+    if (status == "deleted") {
+        task.status = TaskStatus::Deleted;
+    } else if (status == "archived") {
+        task.status = TaskStatus::Archived;
+    } else {
+        task.status = TaskStatus::Active;
+    }
+
+    task.sortOrder = query.value(startColumn + 6).toInt();
+    task.createdAt = query.value(startColumn + 7).toDateTime();
+    task.updatedAt = query.value(startColumn + 8).toDateTime();
+    task.archivedAt = query.value(startColumn + 9).toDateTime();
+    task.dueDate = query.value(startColumn + 10).toDateTime();
+    task.workStatus = static_cast<TaskWorkStatus>(query.value(startColumn + 11).toInt());
+    return task;
+}
+
+SubTask subtaskFromSearchQuery(const QSqlQuery &query, int startColumn)
+{
+    SubTask subtask;
+    subtask.id = query.value(startColumn + 0).toInt();
+    subtask.taskId = query.value(startColumn + 1).toInt();
+    subtask.title = query.value(startColumn + 2).toString();
+    subtask.content = query.value(startColumn + 3).toString();
+    subtask.completed = query.value(startColumn + 4).toBool();
+    subtask.sortOrder = query.value(startColumn + 5).toInt();
+    subtask.createdAt = query.value(startColumn + 6).toDateTime();
+    subtask.updatedAt = query.value(startColumn + 7).toDateTime();
+    return subtask;
+}
 }
 
 DatabaseManager& DatabaseManager::instance()
@@ -171,18 +243,25 @@ bool DatabaseManager::createTables()
 bool DatabaseManager::createFtsTables()
 {
     QSqlQuery query(m_db);
+    const bool hadTasksFts = tableExists(m_db, "tasks_fts");
+    const bool hadSubtasksFts = tableExists(m_db, "subtasks_fts");
 
-    // FTS5 virtual table for full-text search
     if (!query.exec(
         "CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5("
         "  title, content, content=tasks, content_rowid=id"
         ")")) {
         qWarning() << "Failed to create FTS table (FTS5 may not be available):" << query.lastError().text();
-        // Non-fatal: fall back to LIKE-based search
         return true;
     }
 
-    // Triggers to keep FTS in sync
+    if (!query.exec(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS subtasks_fts USING fts5("
+        "  title, content, content=subtasks, content_rowid=id"
+        ")")) {
+        qWarning() << "Failed to create subtask FTS table (FTS5 may not be available):" << query.lastError().text();
+        return true;
+    }
+
     if (!query.exec(
         "CREATE TRIGGER IF NOT EXISTS tasks_ai AFTER INSERT ON tasks BEGIN "
         "  INSERT INTO tasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
@@ -205,9 +284,36 @@ bool DatabaseManager::createFtsTables()
         qCritical() << "Failed to create tasks_au trigger:" << query.lastError().text();
         return false;
     }
+    if (!query.exec(
+        "CREATE TRIGGER IF NOT EXISTS subtasks_ai AFTER INSERT ON subtasks BEGIN "
+        "  INSERT INTO subtasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
+        "END")) {
+        qCritical() << "Failed to create subtasks_ai trigger:" << query.lastError().text();
+        return false;
+    }
+    if (!query.exec(
+        "CREATE TRIGGER IF NOT EXISTS subtasks_ad AFTER DELETE ON subtasks BEGIN "
+        "  INSERT INTO subtasks_fts(subtasks_fts, rowid, title, content) VALUES ('delete', old.id, old.title, old.content); "
+        "END")) {
+        qCritical() << "Failed to create subtasks_ad trigger:" << query.lastError().text();
+        return false;
+    }
+    if (!query.exec(
+        "CREATE TRIGGER IF NOT EXISTS subtasks_au AFTER UPDATE ON subtasks BEGIN "
+        "  INSERT INTO subtasks_fts(subtasks_fts, rowid, title, content) VALUES ('delete', old.id, old.title, old.content); "
+        "  INSERT INTO subtasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
+        "END")) {
+        qCritical() << "Failed to create subtasks_au trigger:" << query.lastError().text();
+        return false;
+    }
 
-    if (!query.exec("INSERT INTO tasks_fts(tasks_fts) VALUES ('rebuild')")) {
+    if (!hadTasksFts && !query.exec("INSERT INTO tasks_fts(tasks_fts) VALUES ('rebuild')")) {
         qCritical() << "Failed to rebuild tasks FTS index:" << query.lastError().text();
+        return false;
+    }
+
+    if (!hadSubtasksFts && !query.exec("INSERT INTO subtasks_fts(subtasks_fts) VALUES ('rebuild')")) {
+        qCritical() << "Failed to rebuild subtasks FTS index:" << query.lastError().text();
         return false;
     }
 
@@ -994,74 +1100,151 @@ void DatabaseManager::cleanupOldSubtaskHistory(int subtaskId, int maxAgeMinutes)
 
 // --- Search ---
 
-QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
+QList<SearchResult> DatabaseManager::searchItems(const QString &query, int productId)
 {
-    QList<Task> tasks;
-    QSqlQuery q(m_db);
-
-    // Try FTS5 first
-    QString sql;
-    if (productId > 0) {
-        sql = "SELECT t.id, t.product_id, t.title, t.content, t.priority, t.status, "
-              "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, "
-              "t.work_status "
-              "FROM tasks t INNER JOIN tasks_fts f ON t.id = f.rowid "
-              "WHERE tasks_fts MATCH ? AND t.product_id = ? "
-              "ORDER BY rank";
-        q.prepare(sql);
-        q.addBindValue(query);
-        q.addBindValue(productId);
-    } else {
-        sql = "SELECT t.id, t.product_id, t.title, t.content, t.priority, t.status, "
-              "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, "
-              "t.work_status "
-              "FROM tasks t INNER JOIN tasks_fts f ON t.id = f.rowid "
-              "WHERE tasks_fts MATCH ? "
-              "ORDER BY rank";
-        q.prepare(sql);
-        q.addBindValue(query);
+    QList<SearchResult> results;
+    const QString trimmedQuery = query.trimmed();
+    if (trimmedQuery.isEmpty()) {
+        return results;
     }
 
-    if (!q.exec()) {
-        // Fallback to LIKE-based search
-        qWarning() << "FTS search failed, using LIKE fallback:" << q.lastError().text();
-        QString likeQuery = "%" + query + "%";
-        if (productId > 0) {
-            q.prepare(
-                "SELECT id, product_id, title, content, priority, status, sort_order, "
-                "created_at, updated_at, archived_at, due_date, work_status FROM tasks "
-                "WHERE (title LIKE ? OR content LIKE ?) AND product_id = ?");
-            q.addBindValue(likeQuery);
-            q.addBindValue(likeQuery);
-            q.addBindValue(productId);
-        } else {
-            q.prepare(
-                "SELECT id, product_id, title, content, priority, status, sort_order, "
-                "created_at, updated_at, archived_at, due_date, work_status FROM tasks "
-                "WHERE title LIKE ? OR content LIKE ?");
-            q.addBindValue(likeQuery);
-            q.addBindValue(likeQuery);
+    const QString ftsQuery = buildFtsMatchQuery(trimmedQuery);
+    const QString likeQuery = "%" + trimmedQuery + "%";
+
+    auto appendTaskMatches = [&results](QSqlQuery &searchQuery) {
+        while (searchQuery.next()) {
+            SearchResult result;
+            result.parentTask = taskFromSearchQuery(searchQuery);
+            results.append(result);
         }
-        q.exec();
+    };
+
+    auto appendSubtaskMatches = [&results](QSqlQuery &searchQuery) {
+        while (searchQuery.next()) {
+            SearchResult result;
+            result.parentTask = taskFromSearchQuery(searchQuery, 0);
+            result.matchedSubtask = subtaskFromSearchQuery(searchQuery, 12);
+            result.isSubtaskMatch = true;
+            results.append(result);
+        }
+    };
+
+    QString taskFtsSql =
+        "SELECT t.id, t.product_id, t.title, t.content, t.priority, t.status, "
+        "t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, "
+        "t.work_status "
+        "FROM tasks t INNER JOIN tasks_fts f ON t.id = f.rowid "
+        "WHERE tasks_fts MATCH ?";
+    if (productId > 0) {
+        taskFtsSql += " AND t.product_id = ?";
+    }
+    taskFtsSql += " ORDER BY rank";
+
+    auto runTaskLikeFallback = [&]() {
+        QSqlQuery fallbackQuery(m_db);
+        QString taskLikeSql =
+            "SELECT id, product_id, title, content, priority, status, sort_order, "
+            "created_at, updated_at, archived_at, due_date, work_status "
+            "FROM tasks WHERE (title LIKE ? OR content LIKE ?)";
+        if (productId > 0) {
+            taskLikeSql += " AND product_id = ?";
+        }
+
+        fallbackQuery.prepare(taskLikeSql);
+        fallbackQuery.addBindValue(likeQuery);
+        fallbackQuery.addBindValue(likeQuery);
+        if (productId > 0) {
+            fallbackQuery.addBindValue(productId);
+        }
+        if (!fallbackQuery.exec()) {
+            qWarning() << "Task LIKE search failed:" << fallbackQuery.lastError().text();
+            return;
+        }
+        appendTaskMatches(fallbackQuery);
+    };
+
+    {
+        QSqlQuery taskQuery(m_db);
+        if (!taskQuery.prepare(taskFtsSql)) {
+            qWarning() << "Task FTS search unavailable, using LIKE fallback:" << taskQuery.lastError().text();
+            runTaskLikeFallback();
+        } else {
+            taskQuery.addBindValue(ftsQuery);
+            if (productId > 0) {
+                taskQuery.addBindValue(productId);
+            }
+
+            if (!taskQuery.exec()) {
+                qWarning() << "Task FTS search failed, using LIKE fallback:" << taskQuery.lastError().text();
+                runTaskLikeFallback();
+            } else {
+                appendTaskMatches(taskQuery);
+            }
+        }
     }
 
-    while (q.next()) {
-        Task t;
-        t.id = q.value(0).toInt();
-        t.productId = q.value(1).toInt();
-        t.title = q.value(2).toString();
-        t.content = q.value(3).toString();
-        t.priority = static_cast<TaskPriority>(q.value(4).toInt());
-        t.status = (q.value(5).toString() == "active") ? TaskStatus::Active : TaskStatus::Archived;
-        t.sortOrder = q.value(6).toInt();
-        t.createdAt = q.value(7).toDateTime();
-        t.updatedAt = q.value(8).toDateTime();
-        t.archivedAt = q.value(9).toDateTime();
-        t.dueDate = q.value(10).toDateTime();
-        t.workStatus = static_cast<TaskWorkStatus>(q.value(11).toInt());
-        tasks.append(t);
+    QString subtaskFtsSql =
+        "SELECT "
+        "  t.id, t.product_id, t.title, t.content, t.priority, t.status, "
+        "  t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, t.work_status, "
+        "  s.id, s.task_id, s.title, s.content, s.completed, s.sort_order, s.created_at, s.updated_at "
+        "FROM subtasks s "
+        "INNER JOIN subtasks_fts f ON s.id = f.rowid "
+        "INNER JOIN tasks t ON t.id = s.task_id "
+        "WHERE subtasks_fts MATCH ?";
+    if (productId > 0) {
+        subtaskFtsSql += " AND t.product_id = ?";
     }
-    return tasks;
+    subtaskFtsSql += " ORDER BY rank";
+
+    auto runSubtaskLikeFallback = [&]() {
+        QSqlQuery fallbackQuery(m_db);
+        QString subtaskLikeSql =
+            "SELECT "
+            "  t.id, t.product_id, t.title, t.content, t.priority, t.status, "
+            "  t.sort_order, t.created_at, t.updated_at, t.archived_at, t.due_date, t.work_status, "
+            "  s.id, s.task_id, s.title, s.content, s.completed, s.sort_order, s.created_at, s.updated_at "
+            "FROM subtasks s "
+            "INNER JOIN tasks t ON t.id = s.task_id "
+            "WHERE (s.title LIKE ? OR s.content LIKE ?)";
+        if (productId > 0) {
+            subtaskLikeSql += " AND t.product_id = ?";
+        }
+
+        fallbackQuery.prepare(subtaskLikeSql);
+        fallbackQuery.addBindValue(likeQuery);
+        fallbackQuery.addBindValue(likeQuery);
+        if (productId > 0) {
+            fallbackQuery.addBindValue(productId);
+        }
+        if (!fallbackQuery.exec()) {
+            qWarning() << "Subtask LIKE search failed:" << fallbackQuery.lastError().text();
+            return;
+        }
+        appendSubtaskMatches(fallbackQuery);
+    };
+
+    {
+        QSqlQuery subtaskQuery(m_db);
+        if (!subtaskQuery.prepare(subtaskFtsSql)) {
+            qWarning() << "Subtask FTS search unavailable, using LIKE fallback:" << subtaskQuery.lastError().text();
+            runSubtaskLikeFallback();
+        } else {
+            subtaskQuery.addBindValue(ftsQuery);
+            if (productId > 0) {
+                subtaskQuery.addBindValue(productId);
+            }
+
+            if (!subtaskQuery.exec()) {
+                qWarning() << "Subtask FTS search failed, using LIKE fallback:" << subtaskQuery.lastError().text();
+                runSubtaskLikeFallback();
+            } else {
+                appendSubtaskMatches(subtaskQuery);
+            }
+        }
+    }
+
+    return results;
 }
 
 // --- Database Path & Backup ---

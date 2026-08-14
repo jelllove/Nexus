@@ -1,5 +1,6 @@
 #include "TaskListModel.h"
 #include "db/DatabaseManager.h"
+#include <QHash>
 
 TaskListModel::TaskListModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -24,6 +25,12 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
             case Qt::DisplayRole:
             case TitleRole:
                 return row.subtask.title;
+            case ContentRole:
+                return row.subtask.content;
+            case CreatedAtRole:
+                return row.subtask.createdAt;
+            case UpdatedAtRole:
+                return row.subtask.updatedAt;
             case IsSubTaskRole:
                 return true;
             case SubTaskCompletedRole:
@@ -32,6 +39,8 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
                 return row.subtask.id;
             case ParentTaskIdRole:
                 return row.subtask.taskId;
+            case IsActiveTaskRole:
+                return m_activeTarget == EditorTarget::subtask(row.subtask.id);
             default:
                 return QVariant();
         }
@@ -74,7 +83,7 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
         case IsExpandedRole:
             return m_expandedTasks.contains(t.id);
         case IsActiveTaskRole:
-            return t.id == m_activeTaskId;
+            return m_activeTarget == EditorTarget::task(t.id);
     }
     return QVariant();
 }
@@ -99,11 +108,46 @@ void TaskListModel::loadDeletedTasks()
     endResetModel();
 }
 
-void TaskListModel::loadSearchResults(const QList<Task> &tasks)
+void TaskListModel::loadSearchResults(const QList<SearchResult> &results)
 {
+    m_currentProductId = -1;
     beginResetModel();
-    m_tasks = tasks;
-    rebuildDisplayRows();
+    m_tasks.clear();
+    m_displayRows.clear();
+
+    QSet<int> appendedParentIds;
+    QList<int> parentOrder;
+    QHash<int, Task> parentTasks;
+    QHash<int, QList<SubTask>> matchedSubtasks;
+
+    for (const SearchResult &result : results) {
+        const int parentId = result.parentTask.id;
+        if (!appendedParentIds.contains(parentId)) {
+            appendedParentIds.insert(parentId);
+            parentOrder.append(parentId);
+            parentTasks.insert(parentId, result.parentTask);
+        }
+
+        if (result.isSubtaskMatch) {
+            matchedSubtasks[parentId].append(result.matchedSubtask);
+        }
+    }
+
+    for (int parentId : parentOrder) {
+        DisplayRow mainRow;
+        mainRow.type = DisplayRow::MainTask;
+        mainRow.task = parentTasks.value(parentId);
+        m_displayRows.append(mainRow);
+
+        const QList<SubTask> subtasks = matchedSubtasks.value(parentId);
+        for (const SubTask &subtask : subtasks) {
+            DisplayRow subRow;
+            subRow.type = DisplayRow::SubTaskRow;
+            subRow.subtask = subtask;
+            m_displayRows.append(subRow);
+        }
+    }
+
     endResetModel();
 }
 
@@ -143,6 +187,31 @@ int TaskListModel::rowForTaskId(int taskId) const
             m_displayRows[i].task.id == taskId)
             return i;
     }
+    return -1;
+}
+
+EditorTarget TaskListModel::targetAt(int row) const
+{
+    if (row < 0 || row >= m_displayRows.size()) {
+        return EditorTarget();
+    }
+
+    const DisplayRow &displayRow = m_displayRows[row];
+    if (displayRow.type == DisplayRow::SubTaskRow) {
+        return EditorTarget::subtask(displayRow.subtask.id);
+    }
+
+    return EditorTarget::task(displayRow.task.id);
+}
+
+int TaskListModel::rowForTarget(const EditorTarget &target) const
+{
+    for (int i = 0; i < m_displayRows.size(); ++i) {
+        if (targetAt(i) == target) {
+            return i;
+        }
+    }
+
     return -1;
 }
 

@@ -14,7 +14,9 @@
 #include <QDialogButtonBox>
 #include <QDateTimeEdit>
 #include <QFormLayout>
+#include <QEvent>
 #include <QLineEdit>
+#include <QMouseEvent>
 #include <QCheckBox>
 
 TaskPane::TaskPane(QWidget *parent)
@@ -79,6 +81,7 @@ void TaskPane::setupUi()
     m_listView->setDropIndicatorShown(true);
     m_listView->setDragDropMode(QAbstractItemView::InternalMove);
     m_listView->setDefaultDropAction(Qt::MoveAction);
+    m_listView->viewport()->installEventFilter(this);
     layout->addWidget(m_listView, 1);
 
     // Add button
@@ -89,7 +92,6 @@ void TaskPane::setupUi()
         "QPushButton:hover { background-color: #3498db; }");
     layout->addWidget(m_addButton);
 
-    connect(m_listView, &QListView::clicked, this, &TaskPane::onTaskClicked);
     connect(m_listView, &QListView::doubleClicked, this, &TaskPane::onTaskDoubleClicked);
     connect(m_addButton, &QPushButton::clicked, this, &TaskPane::onAddTask);
 
@@ -98,7 +100,9 @@ void TaskPane::setupUi()
         m_showingDeleted = false;
         updateFilterButtonStyles();
         if (m_currentProductId > 0) {
+            m_showingSearchResults = false;
             m_model->loadTasks(m_currentProductId, TaskStatus::Active);
+            m_titleLabel->setText("Tasks");
         }
     });
     connect(m_archivedButton, &QPushButton::clicked, this, [this]() {
@@ -106,14 +110,18 @@ void TaskPane::setupUi()
         m_showingDeleted = false;
         updateFilterButtonStyles();
         if (m_currentProductId > 0) {
+            m_showingSearchResults = false;
             m_model->loadTasks(m_currentProductId, TaskStatus::Archived);
+            m_titleLabel->setText("Tasks");
         }
     });
     connect(m_deletedButton, &QPushButton::clicked, this, [this]() {
         m_showingArchived = false;
         m_showingDeleted = true;
         updateFilterButtonStyles();
+        m_showingSearchResults = false;
         m_model->loadDeletedTasks();
+        m_titleLabel->setText("Tasks");
     });
 
     // Periodic refresh timer for live progress bar updates
@@ -164,6 +172,7 @@ void TaskPane::setupContextMenu()
         if (isSubTask) {
             int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
             bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
+            const EditorTarget activeTarget = m_model->activeTarget();
 
             QAction *toggleAction = menu.addAction(completed ? "Mark Incomplete" : "Mark Complete");
             QAction *renameAction = menu.addAction("Rename");
@@ -173,7 +182,7 @@ void TaskPane::setupContextMenu()
             QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
             if (selected == toggleAction) {
                 DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
-                m_model->refresh();
+                refreshCurrentView();
             } else if (selected == renameAction) {
                 QString currentTitle = index.data(TaskListModel::TitleRole).toString();
                 bool ok;
@@ -181,11 +190,22 @@ void TaskPane::setupContextMenu()
                     "Title:", QLineEdit::Normal, currentTitle, &ok);
                 if (ok && !newTitle.trimmed().isEmpty()) {
                     DatabaseManager::instance().renameSubtask(subtaskId, newTitle.trimmed());
-                    m_model->refresh();
+                    refreshCurrentView();
+                    if (activeTarget == EditorTarget::subtask(subtaskId)) {
+                        const int row = m_model->rowForTarget(activeTarget);
+                        if (row >= 0) {
+                            m_listView->setCurrentIndex(m_model->index(row, 0));
+                        }
+                        emit itemSelected(activeTarget);
+                    }
                 }
             } else if (selected == deleteAction) {
                 DatabaseManager::instance().deleteSubtask(subtaskId);
-                m_model->refresh();
+                refreshCurrentView();
+                if (activeTarget == EditorTarget::subtask(subtaskId)) {
+                    setActiveTarget(EditorTarget());
+                    emit itemSelected(EditorTarget());
+                }
             }
             return;
         }
@@ -202,7 +222,7 @@ void TaskPane::setupContextMenu()
             if (selected == restoreAction) {
                 DatabaseManager::instance().restoreTask(taskId);
                 m_model->loadDeletedTasks();
-                emit taskSelected(-1);
+                emit itemSelected(EditorTarget());
             } else if (selected == permDeleteAction) {
                 auto result = QMessageBox::warning(this, "Permanently Delete",
                     "This task will be permanently deleted and cannot be recovered.\nAre you sure?",
@@ -210,7 +230,7 @@ void TaskPane::setupContextMenu()
                 if (result == QMessageBox::Yes) {
                     DatabaseManager::instance().permanentlyDeleteTask(taskId);
                     m_model->loadDeletedTasks();
-                    emit taskSelected(-1);
+                    emit itemSelected(EditorTarget());
                 }
             }
             return;
@@ -277,7 +297,7 @@ void TaskPane::setupContextMenu()
         for (int i = 0; i < priorityMenu->actions().size(); ++i) {
             if (selected == priorityMenu->actions()[i]) {
                 DatabaseManager::instance().updateTaskPriority(taskId, static_cast<TaskPriority>(i));
-                m_model->refresh();
+                refreshCurrentView();
                 return;
             }
         }
@@ -286,18 +306,18 @@ void TaskPane::setupContextMenu()
             QDateTime newDate = showDueDateDialog(currentDue);
             if (newDate.isValid()) {
                 DatabaseManager::instance().updateTaskDueDate(taskId, newDate);
-                m_model->refresh();
+                refreshCurrentView();
             }
         } else if (selected == clearDueDateAction) {
             DatabaseManager::instance().updateTaskDueDate(taskId, QDateTime());
-            m_model->refresh();
+            refreshCurrentView();
         }
 
         // Check status actions
         for (int i = 0; i < 5; ++i) {
             if (selected == statusActions[i]) {
                 DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
-                m_model->refresh();
+                refreshCurrentView();
                 return;
             }
         }
@@ -319,7 +339,7 @@ void TaskPane::setupContextMenu()
                 if (!m_model->isExpanded(taskId)) {
                     m_model->toggleExpand(taskId);
                 } else {
-                    m_model->refresh();
+                    refreshCurrentView();
                 }
             }
         }
@@ -330,8 +350,49 @@ void TaskPane::loadTasks(int productId)
 {
     m_currentProductId = productId;
     TaskStatus status = m_showingArchived ? TaskStatus::Archived : TaskStatus::Active;
+    m_showingSearchResults = false;
     m_model->loadTasks(productId, status);
     m_titleLabel->setText("Tasks");
+    syncSelectionToActiveTarget();
+}
+
+void TaskPane::showSearchResults(const QList<SearchResult> &results)
+{
+    m_showingSearchResults = true;
+    m_model->loadSearchResults(results);
+    m_titleLabel->setText("Search Results");
+    syncSelectionToActiveTarget();
+}
+
+void TaskPane::refreshCurrentView()
+{
+    m_showingSearchResults = false;
+
+    if (m_showingDeleted) {
+        m_model->loadDeletedTasks();
+    } else if (m_currentProductId > 0) {
+        const TaskStatus status = m_showingArchived ? TaskStatus::Archived : TaskStatus::Active;
+        m_model->loadTasks(m_currentProductId, status);
+    }
+
+    m_titleLabel->setText("Tasks");
+    syncSelectionToActiveTarget();
+}
+
+void TaskPane::setActiveTarget(const EditorTarget &target)
+{
+    m_model->setActiveTarget(target);
+    syncSelectionToActiveTarget();
+}
+
+EditorTarget TaskPane::activeTarget() const
+{
+    return m_model->activeTarget();
+}
+
+bool TaskPane::containsTarget(const EditorTarget &target) const
+{
+    return target.isValid() && m_model->rowForTarget(target) >= 0;
 }
 
 void TaskPane::showArchived(bool archived)
@@ -350,56 +411,96 @@ int TaskPane::selectedTaskId() const
     return m_model->taskIdAt(index.row());
 }
 
-void TaskPane::onTaskClicked(const QModelIndex &index)
+void TaskPane::syncSelectionToActiveTarget()
 {
-    QPoint clickPos = m_listView->viewport()->mapFromGlobal(QCursor::pos());
+    const EditorTarget target = m_model->activeTarget();
+    if (!target.isValid()) {
+        m_listView->clearSelection();
+        m_listView->setCurrentIndex(QModelIndex());
+        m_listView->viewport()->update();
+        return;
+    }
+
+    const int row = m_model->rowForTarget(target);
+    if (row < 0) {
+        m_model->setActiveTarget(EditorTarget());
+        m_listView->clearSelection();
+        m_listView->setCurrentIndex(QModelIndex());
+        m_listView->viewport()->update();
+        return;
+    }
+
+    m_listView->setCurrentIndex(m_model->index(row, 0));
+    m_listView->viewport()->update();
+}
+
+bool TaskPane::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_listView->viewport() && event->type() == QEvent::MouseButtonRelease) {
+        auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (mouseEvent->button() == Qt::LeftButton) {
+            const QModelIndex index = m_listView->indexAt(mouseEvent->pos());
+            if (index.isValid()) {
+                handleItemClick(index, mouseEvent->pos());
+                return true;
+            }
+        }
+    }
+
+    return QWidget::eventFilter(watched, event);
+}
+
+void TaskPane::handleItemClick(const QModelIndex &index, const QPoint &viewportPosition)
+{
     QStyleOptionViewItem option;
     option.rect = m_listView->visualRect(index);
     option.font = m_listView->font();
 
     bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
 
-    // SubTask: check if checkbox was clicked
     if (isSubTask) {
-        QRect checkRect = TaskCardDelegate::subtaskCheckboxRect(option);
-        if (checkRect.contains(clickPos)) {
+        const QRect checkRect = TaskCardDelegate::subtaskCheckboxRect(option);
+        if (checkRect.contains(viewportPosition)) {
             int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
             bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
             DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
-            m_model->refresh();
+            refreshCurrentView();
+            return;
         }
+
+        const EditorTarget target = EditorTarget::subtask(
+            index.data(TaskListModel::SubTaskIdRole).toInt());
+        setActiveTarget(target);
+        emit itemSelected(target);
         return;
     }
 
-    // Main task: check expand icon
-    bool hasSubTasks = index.data(TaskListModel::HasSubTasksRole).toBool();
+    const int taskId = m_model->taskIdAt(index.row());
+
+    const bool hasSubTasks = index.data(TaskListModel::HasSubTasksRole).toBool();
     if (hasSubTasks) {
-        QRect expandRect = TaskCardDelegate::expandIconRect(option, index);
-        if (expandRect.contains(clickPos)) {
-            int taskId = m_model->taskIdAt(index.row());
+        const QRect expandRect = TaskCardDelegate::expandIconRect(option, index);
+        if (expandRect.contains(viewportPosition)) {
             m_model->toggleExpand(taskId);
             return;
         }
     }
 
-    // Check if the click hit the priority badge
-    QRect badgeRect = TaskCardDelegate::priorityBadgeRect(option, index);
-    if (badgeRect.contains(clickPos)) {
+    const QRect badgeRect = TaskCardDelegate::priorityBadgeRect(option, index);
+    if (badgeRect.contains(viewportPosition)) {
         showPriorityPopup(index, QCursor::pos());
         return;
     }
 
-    // Check if the click hit the work status icon
-    QRect statusRect = TaskCardDelegate::workStatusIconRect(option, index);
-    if (statusRect.contains(clickPos)) {
+    const QRect statusRect = TaskCardDelegate::workStatusIconRect(option, index);
+    if (statusRect.contains(viewportPosition)) {
         showWorkStatusPopup(index, QCursor::pos());
         return;
     }
 
-    int taskId = m_model->taskIdAt(index.row());
-    m_model->setActiveTaskId(taskId);
-    m_listView->viewport()->update();
-    emit taskSelected(taskId);
+    const EditorTarget target = EditorTarget::task(taskId);
+    setActiveTarget(target);
+    emit itemSelected(target);
 }
 
 void TaskPane::onTaskDoubleClicked(const QModelIndex &index)
@@ -621,9 +722,8 @@ void TaskPane::onAddTask()
     // Select the newly added task
     int row = m_model->rowForTaskId(newId);
     if (row >= 0) {
-        QModelIndex idx = m_model->index(row);
-        m_listView->setCurrentIndex(idx);
-        emit taskSelected(newId);
+        setActiveTarget(EditorTarget::task(newId));
+        emit itemSelected(EditorTarget::task(newId));
     }
 }
 
@@ -639,7 +739,8 @@ void TaskPane::onDeleteTask()
 
     if (result == QMessageBox::Yes) {
         m_model->removeTask(index.row());
-        emit taskSelected(-1);  // Clear editor
+        setActiveTarget(EditorTarget());
+        emit itemSelected(EditorTarget());
     }
 }
 
@@ -651,7 +752,8 @@ void TaskPane::onArchiveTask()
     int taskId = m_model->taskIdAt(index.row());
     DatabaseManager::instance().archiveTask(taskId);
     m_model->refresh();
-    emit taskSelected(-1);
+    setActiveTarget(EditorTarget());
+    emit itemSelected(EditorTarget());
 }
 
 void TaskPane::onReactivateTask()
@@ -662,7 +764,8 @@ void TaskPane::onReactivateTask()
     int taskId = m_model->taskIdAt(index.row());
     DatabaseManager::instance().reactivateTask(taskId);
     m_model->refresh();
-    emit taskSelected(-1);
+    setActiveTarget(EditorTarget());
+    emit itemSelected(EditorTarget());
 }
 
 void TaskPane::onChangePriority()

@@ -1,12 +1,18 @@
 #include <QtTest>
 #include <QDir>
 #include <QFile>
+#include <QListView>
+#include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include "db/DatabaseManager.h"
 #include "models/EditorTarget.h"
+#include "models/SearchResult.h"
+#include "models/TaskListModel.h"
+#include "ui/TaskCardDelegate.h"
+#include "ui/TaskPane.h"
 
 class SubtaskFeatureTests : public QObject
 {
@@ -110,6 +116,151 @@ private slots:
 
         QCOMPARE(database.getContentHistory(1), QList<QString>{"<p>parent snapshot</p>"});
         QCOMPARE(database.getSubtaskContentHistory(1), QList<QString>{"<p>child snapshot</p>"});
+    }
+
+    void searchReturnsTypedParentAndSubtaskMatches()
+    {
+        auto &database = DatabaseManager::instance();
+        QVERIFY(database.updateTaskContent(1, "<p>parent-only-key</p>"));
+        QVERIFY(database.updateSubtaskContent(1, "<p>child-only-key</p>"));
+
+        const QList<SearchResult> parentResults = database.searchItems("parent-only-key");
+        QCOMPARE(parentResults.size(), 1);
+        QCOMPARE(parentResults.first().target(), EditorTarget::task(1));
+
+        const QList<SearchResult> childResults = database.searchItems("child-only-key");
+        QCOMPARE(childResults.size(), 1);
+        QCOMPARE(childResults.first().target(), EditorTarget::subtask(1));
+        QCOMPARE(childResults.first().parentTask.id, 1);
+    }
+
+    void searchModelPreservesParentContextAndTypedRows()
+    {
+        auto &database = DatabaseManager::instance();
+        QVERIFY(database.updateSubtaskContent(1, "<p>child-only-key</p>"));
+
+        const QList<SearchResult> results = database.searchItems("child-only-key");
+        TaskListModel model;
+        model.loadSearchResults(results);
+
+        QCOMPARE(model.rowCount(), 2);
+        QCOMPARE(model.targetAt(0), EditorTarget::task(1));
+        QCOMPARE(model.targetAt(1), EditorTarget::subtask(1));
+        QVERIFY(model.index(1, 0).data(TaskListModel::IsSubTaskRole).toBool());
+        QCOMPARE(model.index(1, 0).data(TaskListModel::ContentRole).toString(),
+                 QString("<p>child-only-key</p>"));
+    }
+
+    void typedContentWritesRouteToTheirOwnLayer()
+    {
+        auto &database = DatabaseManager::instance();
+        const auto write = [&database](const EditorTarget &target, const QString &content) {
+            if (target.kind == EditorTargetKind::Task) {
+                return database.updateTaskContent(target.id, content);
+            }
+            if (target.kind == EditorTargetKind::SubTask) {
+                return database.updateSubtaskContent(target.id, content);
+            }
+            return false;
+        };
+
+        QVERIFY(write(EditorTarget::task(1), "<p>task routed</p>"));
+        QVERIFY(write(EditorTarget::subtask(1), "<p>subtask routed</p>"));
+        QCOMPARE(database.getTask(1).content, QString("<p>task routed</p>"));
+        QCOMPARE(database.getSubtask(1).content, QString("<p>subtask routed</p>"));
+        QVERIFY(!write(EditorTarget(), "<p>invalid</p>"));
+    }
+
+    void subtaskRowsUseThirtyTwoPixelHeight()
+    {
+        TaskListModel model;
+        model.loadTasks(1);
+        model.toggleExpand(1);
+
+        const QModelIndex subtaskIndex = model.index(1, 0);
+        QVERIFY(subtaskIndex.isValid());
+
+        TaskCardDelegate delegate;
+        QStyleOptionViewItem option;
+        QCOMPARE(delegate.sizeHint(option, subtaskIndex).height(), 32);
+    }
+
+    void subtaskBodySelectsButCheckboxOnlyToggles()
+    {
+        auto &database = DatabaseManager::instance();
+        QVERIFY(database.toggleSubtask(1, false));
+
+        TaskPane pane;
+        pane.resize(420, 500);
+        pane.loadTasks(1);
+
+        auto *model = pane.findChild<TaskListModel *>();
+        auto *view = pane.findChild<QListView *>();
+        QVERIFY(model);
+        QVERIFY(view);
+
+        model->toggleExpand(1);
+        pane.show();
+        QTest::qWait(50);
+
+        const QModelIndex subtaskIndex = model->index(1, 0);
+        QVERIFY(subtaskIndex.isValid());
+
+        QSignalSpy selectionSpy(&pane, &TaskPane::itemSelected);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->visualRect(subtaskIndex).center());
+        QCOMPARE(selectionSpy.count(), 1);
+        QCOMPARE(qvariant_cast<EditorTarget>(selectionSpy.takeFirst().at(0)),
+                 EditorTarget::subtask(1));
+
+        QStyleOptionViewItem option;
+        option.rect = view->visualRect(subtaskIndex);
+        option.font = view->font();
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          TaskCardDelegate::subtaskCheckboxRect(option).center());
+        QCOMPARE(selectionSpy.count(), 0);
+        QVERIFY(database.getSubtask(1).completed);
+    }
+
+    void subtaskDataCascadesOnPermanentParentDeletion()
+    {
+        auto &database = DatabaseManager::instance();
+        const int taskId = database.addTask(1, "Disposable parent");
+        const int subtaskId = database.addSubtask(taskId, "Disposable child");
+        QVERIFY(taskId > 0);
+        QVERIFY(subtaskId > 0);
+        QVERIFY(database.updateSubtaskContent(subtaskId, "<p>disposable note</p>"));
+        QVERIFY(database.saveSubtaskContentSnapshot(subtaskId, "<p>snapshot</p>"));
+
+        QVERIFY(database.permanentlyDeleteTask(taskId));
+        QCOMPARE(database.getSubtask(subtaskId).id, -1);
+        QVERIFY(database.getSubtaskContentHistory(subtaskId).isEmpty());
+        QVERIFY(database.searchItems("disposable note").isEmpty());
+    }
+
+    void zzSubtaskSearchFallsBackWhenFtsIsUnavailable()
+    {
+        auto &database = DatabaseManager::instance();
+        QVERIFY(database.updateSubtaskContent(1, "<p>fallback-child-key</p>"));
+
+        {
+            QSqlDatabase connection =
+                QSqlDatabase::addDatabase("QSQLITE", "disable-subtask-fts");
+            connection.setDatabaseName(m_databasePath);
+            QVERIFY(connection.open());
+
+            QSqlQuery query(connection);
+            QVERIFY(query.exec("DROP TABLE subtasks_fts"));
+            connection.close();
+        }
+        QSqlDatabase::removeDatabase("disable-subtask-fts");
+
+        const QList<SearchResult> results =
+            database.searchItems("fallback-child-key");
+        QCOMPARE(results.size(), 1);
+        QCOMPARE(results.first().target(), EditorTarget::subtask(1));
     }
 
     void cleanupTestCase()

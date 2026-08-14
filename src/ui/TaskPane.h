@@ -17,13 +17,17 @@ public:
 
     void loadTasks(int productId);
     void showArchived(bool archived);
+    void showSearchResults(const QList<SearchResult> &results);
+    void refreshCurrentView();
+    void setActiveTarget(const EditorTarget &target);
+    EditorTarget activeTarget() const;
+    bool containsTarget(const EditorTarget &target) const;
     int selectedTaskId() const;
 
 signals:
-    void taskSelected(int taskId);
+    void itemSelected(const EditorTarget &target);
 
 private slots:
-    void onTaskClicked(const QModelIndex &index);
     void onTaskDoubleClicked(const QModelIndex &index);
     void onAddTask();
     void onDeleteTask();
@@ -32,12 +36,17 @@ private slots:
     void onChangePriority();
     void onStatusToggle(bool showArchived);
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     void setupUi();
     void setupContextMenu();
     void updateFilterButtonStyles();
+    void syncSelectionToActiveTarget();
     void showPriorityPopup(const QModelIndex &index, const QPoint &globalPos);
     void showWorkStatusPopup(const QModelIndex &index, const QPoint &globalPos);
+    void handleItemClick(const QModelIndex &index, const QPoint &viewportPosition);
     void handleDropReorder(int fromRow, int toRow);
     QDateTime showDueDateDialog(const QDateTime &current = QDateTime());
 
@@ -52,4 +61,5 @@ private:
     int m_currentProductId = -1;
     bool m_showingArchived = false;
     bool m_showingDeleted = false;
+    bool m_showingSearchResults = false;
 };

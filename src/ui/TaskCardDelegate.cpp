@@ -125,7 +125,7 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
         // Title
         QString title = index.data(TaskListModel::TitleRole).toString();
         QFont titleFont = option.font;
-        titleFont.setPointSize(10);
+        titleFont.setPointSize(11);
         painter->setFont(titleFont);
         painter->setPen(completed ? QColor("#b0b8bc") : QColor("#2c3e50"));
         QRect titleRect(checkRect.right() + 8, rect.top() + 4, rect.width() - indent - 34, 22);
@@ -456,7 +456,7 @@ QSize TaskCardDelegate::sizeHint(const QStyleOptionViewItem &option,
 
     // SubTask rows are compact
     if (index.data(TaskListModel::IsSubTaskRole).toBool()) {
-        return QSize(280, 30);
+        return QSize(280, 32);
     }
 
     TaskWorkStatus ws = static_cast<TaskWorkStatus>(
