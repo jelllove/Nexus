@@ -9,6 +9,7 @@ set(CMAKE_AUTOUIC ON)
 
 # Enable CTest
 include(CTest)
+option(NEXUS_BUILD_APP "Build the Nexus desktop application" ON)
 
 # Find Qt6 components
 find_package(Qt6 REQUIRED COMPONENTS
@@ -19,10 +20,12 @@ find_package(Qt6 REQUIRED COMPONENTS
     Network
 )
 
-find_package(Qt6 QUIET COMPONENTS
+if(NEXUS_BUILD_APP)
+    find_package(Qt6 REQUIRED COMPONENTS
     WebEngineWidgets
     WebChannel
-)
+    )
+endif()
 
 # Collect source files
 set(SOURCES
@@ -71,7 +74,7 @@ set(RESOURCES
     resources/nexus.qrc
 )
 
-if(Qt6WebEngineWidgets_FOUND AND Qt6WebChannel_FOUND)
+if(NEXUS_BUILD_APP)
     # Create executable
     if(WIN32)
         add_executable(${PROJECT_NAME} WIN32 ${SOURCES} ${HEADERS} ${RESOURCES})
@@ -124,8 +127,6 @@ if(Qt6WebEngineWidgets_FOUND AND Qt6WebChannel_FOUND)
             MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         )
     endif()
-else()
-    message(WARNING "Qt WebEngine components not found; skipping Nexus application target.")
 endif()
 
 if(BUILD_TESTING)
