@@ -244,6 +244,7 @@ void MainWindow::onItemSelected(const EditorTarget &target)
 
 void MainWindow::onSearchRequested(const QString &query)
 {
+    const QString previousQuery = m_taskPane->currentSearchQuery();
     const QList<SearchResult> results = DatabaseManager::instance().searchItems(query);
     const EditorTarget currentTarget = m_editorPane->currentTarget();
 
@@ -262,6 +263,7 @@ void MainWindow::onSearchRequested(const QString &query)
 
     if (!currentTargetVisible && currentTarget.isValid()
         && !m_editorPane->loadItem(EditorTarget())) {
+        m_searchBar->setSearchText(previousQuery);
         return;
     }
 
@@ -299,6 +301,7 @@ void MainWindow::onSearchCleared()
                 if (!previousQuery.isEmpty()) {
                     m_taskPane->showSearchResults(previousQuery, previousResults);
                 }
+                m_searchBar->setSearchText(previousQuery);
                 m_taskPane->setActiveTarget(currentTarget);
             }
         } else {

@@ -1,5 +1,7 @@
 #include "SearchBar.h"
 
+#include <QSignalBlocker>
+
 SearchBar::SearchBar(QWidget *parent)
     : QWidget(parent)
 {
@@ -47,6 +49,14 @@ SearchBar::SearchBar(QWidget *parent)
 QString SearchBar::searchText() const
 {
     return m_searchInput->text().trimmed();
+}
+
+void SearchBar::setSearchText(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    QSignalBlocker blocker(m_searchInput);
+    m_searchInput->setText(trimmed);
+    m_clearButton->setVisible(!trimmed.isEmpty());
 }
 
 void SearchBar::clear()

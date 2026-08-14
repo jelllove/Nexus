@@ -13,6 +13,7 @@ public:
     explicit SearchBar(QWidget *parent = nullptr);
 
     QString searchText() const;
+    void setSearchText(const QString &text);
     void clear();
 
 signals:
