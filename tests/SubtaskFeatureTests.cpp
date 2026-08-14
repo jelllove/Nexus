@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QDir>
+#include <QFile>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -108,6 +110,19 @@ private slots:
 
         QCOMPARE(database.getContentHistory(1), QList<QString>{"<p>parent snapshot</p>"});
         QCOMPARE(database.getSubtaskContentHistory(1), QList<QString>{"<p>child snapshot</p>"});
+    }
+
+    void cleanupTestCase()
+    {
+        const QString tempPath = m_tempDir.path();
+        QSqlDatabase::database().close();
+        QVERIFY2(QFile::remove(m_databasePath),
+                 qPrintable(QString("Expected test database to be removable during teardown: %1")
+                                .arg(m_databasePath)));
+        QVERIFY(m_tempDir.remove());
+        QVERIFY2(!QDir(tempPath).exists(),
+                 qPrintable(QString("Expected temp directory to be removed during teardown: %1")
+                                .arg(tempPath)));
     }
 };
 
