@@ -63,6 +63,9 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
         case PriorityTextRole:
             return Task::priorityToString(t.priority);
         case StatusRole:
+            if (t.status == TaskStatus::Deleted) {
+                return "deleted";
+            }
             return (t.status == TaskStatus::Active) ? "active" : "archived";
         case CreatedAtRole:
             return t.createdAt;

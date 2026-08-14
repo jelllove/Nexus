@@ -112,7 +112,7 @@ void EditorPane::setupUi()
 
 void EditorPane::loadItem(const EditorTarget &target)
 {
-    if (m_currentTarget.isValid() && m_autoSaveTimer->isActive()) {
+    if (m_currentTarget.isValid() && (m_autoSaveTimer->isActive() || m_hasUnsavedChanges)) {
         m_autoSaveTimer->stop();
         if (!saveCurrentContent()) {
             return;
@@ -168,6 +168,7 @@ void EditorPane::loadItem(const EditorTarget &target)
         m_pendingTitle = title;
         m_pendingTimestamp = timestamp;
     }
+    m_hasUnsavedChanges = false;
 }
 
 void EditorPane::clear()
@@ -177,6 +178,7 @@ void EditorPane::clear()
     m_pendingContent.clear();
     m_pendingTitle.clear();
     m_pendingTimestamp.clear();
+    m_hasUnsavedChanges = false;
 
     if (m_editorReady) {
         setEditorMetadata(m_webView, QStringLiteral("setPageTitle"), QString());
@@ -210,6 +212,7 @@ void EditorPane::onEditorContentChanged(const QString &content)
         return;
     }
 
+    m_hasUnsavedChanges = true;
     m_autoSaveTimer->start();
 }
 
@@ -259,6 +262,7 @@ bool EditorPane::saveCurrentContent()
         return false;
     }
 
+    m_hasUnsavedChanges = false;
     emit contentChanged(m_currentTarget, content);
 
     if (!m_titleGenerationPending && currentTitle.trimmed().isEmpty()) {

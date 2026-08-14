@@ -50,5 +50,6 @@ private:
     QString m_pendingContent;
     QString m_pendingTitle;
     QString m_pendingTimestamp;
+    bool m_hasUnsavedChanges = false;
     bool m_titleGenerationPending = false;
 };

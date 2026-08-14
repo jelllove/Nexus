@@ -285,6 +285,23 @@ private slots:
         QVERIFY(!model.canDropAt(0, 1));
     }
 
+    void searchModelKeepsDeletedTaskStatus()
+    {
+        auto &database = DatabaseManager::instance();
+        const int taskId = database.addTask(1, "Deleted search parent");
+        QVERIFY(taskId > 0);
+        QVERIFY(database.updateTaskContent(taskId, "<p>deleted-search-key</p>"));
+        QVERIFY(database.deleteTask(taskId));
+
+        const QList<SearchResult> results = database.searchItems("deleted-search-key");
+        QVERIFY(!results.isEmpty());
+
+        TaskListModel model;
+        model.loadSearchResults(results);
+        QCOMPARE(model.index(0, 0).data(TaskListModel::StatusRole).toString(),
+                 QString("deleted"));
+    }
+
     void subtaskDataCascadesOnPermanentParentDeletion()
     {
         auto &database = DatabaseManager::instance();
