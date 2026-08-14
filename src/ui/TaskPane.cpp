@@ -99,6 +99,7 @@ void TaskPane::setupUi()
         m_showingArchived = false;
         m_showingDeleted = false;
         updateFilterButtonStyles();
+        m_addButton->setEnabled(true);
         if (m_currentProductId > 0) {
             m_showingSearchResults = false;
             m_currentSearchQuery.clear();
@@ -110,6 +111,7 @@ void TaskPane::setupUi()
         m_showingArchived = true;
         m_showingDeleted = false;
         updateFilterButtonStyles();
+        m_addButton->setEnabled(true);
         if (m_currentProductId > 0) {
             m_showingSearchResults = false;
             m_currentSearchQuery.clear();
@@ -121,6 +123,7 @@ void TaskPane::setupUi()
         m_showingArchived = false;
         m_showingDeleted = true;
         updateFilterButtonStyles();
+        m_addButton->setEnabled(false);
         m_showingSearchResults = false;
         m_currentSearchQuery.clear();
         m_model->loadDeletedTasks();
@@ -355,6 +358,7 @@ void TaskPane::loadTasks(int productId)
     TaskStatus status = m_showingArchived ? TaskStatus::Archived : TaskStatus::Active;
     m_showingSearchResults = false;
     m_currentSearchQuery.clear();
+    m_addButton->setEnabled(!m_showingDeleted);
     m_model->loadTasks(productId, status);
     m_titleLabel->setText("Tasks");
     syncSelectionToActiveTarget();
@@ -364,6 +368,7 @@ void TaskPane::showSearchResults(const QString &query, const QList<SearchResult>
 {
     m_showingSearchResults = true;
     m_currentSearchQuery = query;
+    m_addButton->setEnabled(false);
     m_model->loadSearchResults(results);
     m_titleLabel->setText("Search Results");
     syncSelectionToActiveTarget();
@@ -373,6 +378,7 @@ void TaskPane::clearSearchResults()
 {
     m_showingSearchResults = false;
     m_currentSearchQuery.clear();
+    m_addButton->setEnabled(!m_showingDeleted);
 
     if (m_showingDeleted) {
         m_model->loadDeletedTasks();
@@ -388,6 +394,7 @@ void TaskPane::clearSearchResults()
 void TaskPane::refreshCurrentView()
 {
     if (m_showingSearchResults && !m_currentSearchQuery.isEmpty()) {
+        m_addButton->setEnabled(false);
         m_model->loadSearchResults(DatabaseManager::instance().searchItems(m_currentSearchQuery));
         m_titleLabel->setText("Search Results");
         syncSelectionToActiveTarget();
@@ -396,6 +403,7 @@ void TaskPane::refreshCurrentView()
 
     m_showingSearchResults = false;
     m_currentSearchQuery.clear();
+    m_addButton->setEnabled(!m_showingDeleted);
 
     if (m_showingDeleted) {
         m_model->loadDeletedTasks();
@@ -549,6 +557,8 @@ void TaskPane::handleItemClick(const QModelIndex &index, const QPoint &viewportP
 
 void TaskPane::onTaskDoubleClicked(const QModelIndex &index)
 {
+    if (m_showingSearchResults) return;
+
     bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
     if (isSubTask) return;
 

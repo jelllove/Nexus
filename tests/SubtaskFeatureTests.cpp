@@ -243,6 +243,48 @@ private slots:
         QCOMPARE(model->targetAt(1), EditorTarget::subtask(1));
     }
 
+    void searchResultParentDoubleClickKeepsResultsVisible()
+    {
+        auto &database = DatabaseManager::instance();
+        QVERIFY(database.updateSubtaskContent(1, "<p>doubleclick-search-key</p>"));
+
+        TaskPane pane;
+        pane.resize(420, 500);
+        pane.showSearchResults("doubleclick-search-key",
+                               database.searchItems("doubleclick-search-key"));
+
+        auto *model = pane.findChild<TaskListModel *>();
+        auto *view = pane.findChild<QListView *>();
+        QVERIFY(model);
+        QVERIFY(view);
+        QCOMPARE(model->rowCount(), 2);
+
+        pane.show();
+        QTest::qWait(50);
+
+        const QModelIndex parentIndex = model->index(0, 0);
+        QVERIFY(parentIndex.isValid());
+        QTest::mouseDClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                           view->visualRect(parentIndex).center());
+        QCOMPARE(model->rowCount(), 2);
+        QCOMPARE(model->targetAt(0), EditorTarget::task(1));
+        QCOMPARE(model->targetAt(1), EditorTarget::subtask(1));
+    }
+
+    void searchResultsDisableTaskReordering()
+    {
+        auto &database = DatabaseManager::instance();
+        QVERIFY(database.updateSubtaskContent(1, "<p>drag-search-key</p>"));
+
+        TaskListModel model;
+        model.loadSearchResults(database.searchItems("drag-search-key"));
+
+        const QModelIndex parentIndex = model.index(0, 0);
+        QVERIFY(parentIndex.isValid());
+        QVERIFY(!(model.flags(parentIndex) & Qt::ItemIsDragEnabled));
+        QVERIFY(!model.canDropAt(0, 1));
+    }
+
     void subtaskDataCascadesOnPermanentParentDeletion()
     {
         auto &database = DatabaseManager::instance();

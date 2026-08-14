@@ -274,6 +274,9 @@ bool TaskListModel::isExpanded(int taskId) const
 Qt::ItemFlags TaskListModel::flags(const QModelIndex &index) const
 {
     Qt::ItemFlags defaultFlags = QAbstractListModel::flags(index);
+    if (m_searchMode) {
+        return defaultFlags;
+    }
     if (!index.isValid()) return defaultFlags | Qt::ItemIsDropEnabled;
     if (index.row() < m_displayRows.size() &&
         m_displayRows[index.row()].type == DisplayRow::MainTask) {
@@ -289,6 +292,7 @@ Qt::DropActions TaskListModel::supportedDropActions() const
 
 bool TaskListModel::canDropAt(int fromRow, int toRow) const
 {
+    if (m_searchMode) return false;
     if (fromRow < 0 || fromRow >= m_displayRows.size()) return false;
     if (m_displayRows[fromRow].type != DisplayRow::MainTask) return false;
     if (toRow < 0 || toRow > m_displayRows.size()) return false;
@@ -320,6 +324,7 @@ bool TaskListModel::canDropAt(int fromRow, int toRow) const
 bool TaskListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int count,
                               const QModelIndex &destinationParent, int destinationRow)
 {
+    if (m_searchMode) return false;
     Q_UNUSED(sourceParent);
     Q_UNUSED(destinationParent);
     if (count != 1) return false;
