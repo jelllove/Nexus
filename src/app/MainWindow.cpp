@@ -235,7 +235,7 @@ void MainWindow::onItemSelected(const EditorTarget &target)
 void MainWindow::onSearchRequested(const QString &query)
 {
     const QList<SearchResult> results = DatabaseManager::instance().searchItems(query);
-    m_taskPane->showSearchResults(results);
+    m_taskPane->showSearchResults(query, results);
     if (results.isEmpty()) {
         statusBar()->showMessage(QString("No results found for '%1'").arg(query), 3000);
     } else {
@@ -418,7 +418,7 @@ void MainWindow::refreshTaskPaneForCurrentContext(const EditorTarget &preferredT
     const QString query = m_searchBar->searchText();
 
     if (!query.isEmpty()) {
-        m_taskPane->showSearchResults(DatabaseManager::instance().searchItems(query));
+        m_taskPane->showSearchResults(query, DatabaseManager::instance().searchItems(query));
     } else {
         const int productId = m_productPane->selectedProductId();
         m_taskPane->loadTasks(productId > 0 ? productId : -1);

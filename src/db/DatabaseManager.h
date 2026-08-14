@@ -2,7 +2,10 @@
 
 #include <QObject>
 #include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QList>
+#include <functional>
 #include "models/Product.h"
 #include "models/SearchResult.h"
 #include "models/Task.h"
@@ -96,6 +99,9 @@ private:
     bool migrateDatabase();
     void updateFtsIndex(int taskId, const QString &title, const QString &content);
     void removeFtsEntry(int taskId);
+    bool recoverFtsTablesIfNeeded(const QSqlError &error);
+    bool executeWithFtsRecovery(const std::function<void(QSqlQuery &)> &prepareAndBind);
+    int executeInsertWithFtsRecovery(const std::function<void(QSqlQuery &)> &prepareAndBind);
 
     QSqlDatabase m_db;
     QString m_dbPath;

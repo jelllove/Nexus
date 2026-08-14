@@ -40,14 +40,22 @@ bool tableExists(QSqlDatabase &database, const QString &tableName)
     return query.next();
 }
 
-QString buildFtsMatchQuery(const QString &rawQuery)
+QStringList searchTokens(const QString &rawQuery)
 {
     const QString simplified = rawQuery.simplified();
     if (simplified.isEmpty()) {
+        return {};
+    }
+
+    return simplified.split(' ', Qt::SkipEmptyParts);
+}
+
+QString buildFtsMatchQuery(const QStringList &tokens)
+{
+    if (tokens.isEmpty()) {
         return QString();
     }
 
-    const QStringList tokens = simplified.split(' ', Qt::SkipEmptyParts);
     QStringList escapedTokens;
     escapedTokens.reserve(tokens.size());
     for (QString token : tokens) {
@@ -56,6 +64,34 @@ QString buildFtsMatchQuery(const QString &rawQuery)
     }
 
     return escapedTokens.join(QStringLiteral(" AND "));
+}
+
+QString buildLikeSearchClause(const QString &titleColumn, const QString &contentColumn, int tokenCount)
+{
+    QStringList clauses;
+    clauses.reserve(tokenCount);
+    for (int i = 0; i < tokenCount; ++i) {
+        clauses.append(QStringLiteral("(%1 LIKE ? OR %2 LIKE ?)")
+                           .arg(titleColumn, contentColumn));
+    }
+
+    return clauses.join(QStringLiteral(" AND "));
+}
+
+void bindLikeSearchTokens(QSqlQuery &query, const QStringList &tokens)
+{
+    for (const QString &token : tokens) {
+        const QString pattern = QStringLiteral("%") + token + QStringLiteral("%");
+        query.addBindValue(pattern);
+        query.addBindValue(pattern);
+    }
+}
+
+bool isMissingFtsTableError(const QSqlError &error)
+{
+    const QString errorText = error.text();
+    return errorText.contains(QStringLiteral("no such table"), Qt::CaseInsensitive)
+        && errorText.contains(QStringLiteral("_fts"), Qt::CaseInsensitive);
 }
 
 Task taskFromSearchQuery(const QSqlQuery &query, int startColumn = 0)
@@ -318,6 +354,64 @@ bool DatabaseManager::createFtsTables()
     }
 
     return true;
+}
+
+bool DatabaseManager::recoverFtsTablesIfNeeded(const QSqlError &error)
+{
+    const bool tasksFtsMissing = !tableExists(m_db, "tasks_fts");
+    const bool subtasksFtsMissing = !tableExists(m_db, "subtasks_fts");
+    if (!isMissingFtsTableError(error) && !tasksFtsMissing && !subtasksFtsMissing) {
+        return false;
+    }
+
+    qWarning() << "Recovering missing FTS table:" << error.text();
+    return createFtsTables();
+}
+
+bool DatabaseManager::executeWithFtsRecovery(
+    const std::function<void(QSqlQuery &)> &prepareAndBind)
+{
+    QSqlQuery query(m_db);
+    prepareAndBind(query);
+    if (query.exec()) {
+        return true;
+    }
+
+    if (!recoverFtsTablesIfNeeded(query.lastError())) {
+        return false;
+    }
+
+    QSqlQuery retry(m_db);
+    prepareAndBind(retry);
+    if (retry.exec()) {
+        return true;
+    }
+
+    qWarning() << "Query failed after FTS recovery:" << retry.lastError().text();
+    return false;
+}
+
+int DatabaseManager::executeInsertWithFtsRecovery(
+    const std::function<void(QSqlQuery &)> &prepareAndBind)
+{
+    QSqlQuery query(m_db);
+    prepareAndBind(query);
+    if (query.exec()) {
+        return query.lastInsertId().toInt();
+    }
+
+    if (!recoverFtsTablesIfNeeded(query.lastError())) {
+        return -1;
+    }
+
+    QSqlQuery retry(m_db);
+    prepareAndBind(retry);
+    if (retry.exec()) {
+        return retry.lastInsertId().toInt();
+    }
+
+    qWarning() << "Insert failed after FTS recovery:" << retry.lastError().text();
+    return -1;
 }
 
 bool DatabaseManager::migrateDatabase()
@@ -691,41 +785,42 @@ Task DatabaseManager::getTask(int id)
 
 int DatabaseManager::addTask(int productId, const QString &title, TaskPriority priority, const QDateTime &dueDate)
 {
-    QSqlQuery query(m_db);
-    if (dueDate.isValid()) {
-        query.prepare("INSERT INTO tasks (product_id, title, priority, due_date) VALUES (?, ?, ?, ?)");
-        query.addBindValue(productId);
-        query.addBindValue(title);
-        query.addBindValue(static_cast<int>(priority));
-        query.addBindValue(dueDate.toString(Qt::ISODate));
-    } else {
-        query.prepare("INSERT INTO tasks (product_id, title, priority) VALUES (?, ?, ?)");
-        query.addBindValue(productId);
-        query.addBindValue(title);
-        query.addBindValue(static_cast<int>(priority));
-    }
-    if (query.exec()) {
-        int id = query.lastInsertId().toInt();
+    const int id = executeInsertWithFtsRecovery(
+        [&](QSqlQuery &query) {
+            if (dueDate.isValid()) {
+                query.prepare("INSERT INTO tasks (product_id, title, priority, due_date) VALUES (?, ?, ?, ?)");
+                query.addBindValue(productId);
+                query.addBindValue(title);
+                query.addBindValue(static_cast<int>(priority));
+                query.addBindValue(dueDate.toString(Qt::ISODate));
+            } else {
+                query.prepare("INSERT INTO tasks (product_id, title, priority) VALUES (?, ?, ?)");
+                query.addBindValue(productId);
+                query.addBindValue(title);
+                query.addBindValue(static_cast<int>(priority));
+            }
+        });
+    if (id > 0) {
         emit taskAdded(id);
         return id;
     }
-    qWarning() << "Failed to add task:" << query.lastError().text();
+    qWarning() << "Failed to add task.";
     return -1;
 }
 
 bool DatabaseManager::updateTask(const Task &task)
 {
-    QSqlQuery query(m_db);
-    query.prepare(
-        "UPDATE tasks SET title = ?, content = ?, priority = ?, status = ?, "
-        "sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(task.title);
-    query.addBindValue(task.content);
-    query.addBindValue(static_cast<int>(task.priority));
-    query.addBindValue(task.status == TaskStatus::Active ? "active" : "archived");
-    query.addBindValue(task.sortOrder);
-    query.addBindValue(task.id);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare(
+                "UPDATE tasks SET title = ?, content = ?, priority = ?, status = ?, "
+                "sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(task.title);
+            query.addBindValue(task.content);
+            query.addBindValue(static_cast<int>(task.priority));
+            query.addBindValue(task.status == TaskStatus::Active ? "active" : "archived");
+            query.addBindValue(task.sortOrder);
+            query.addBindValue(task.id);
+        })) {
         emit taskUpdated(task.id);
         return true;
     }
@@ -734,11 +829,11 @@ bool DatabaseManager::updateTask(const Task &task)
 
 bool DatabaseManager::updateTaskTitle(int taskId, const QString &title)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(title);
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(title);
+            query.addBindValue(taskId);
+        })) {
         emit taskUpdated(taskId);
         return true;
     }
@@ -747,11 +842,11 @@ bool DatabaseManager::updateTaskTitle(int taskId, const QString &title)
 
 bool DatabaseManager::updateTaskContent(int taskId, const QString &content)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(content);
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(content);
+            query.addBindValue(taskId);
+        })) {
         emit taskUpdated(taskId);
         return true;
     }
@@ -760,11 +855,11 @@ bool DatabaseManager::updateTaskContent(int taskId, const QString &content)
 
 bool DatabaseManager::updateTaskPriority(int taskId, TaskPriority priority)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(static_cast<int>(priority));
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(static_cast<int>(priority));
+            query.addBindValue(taskId);
+        })) {
         emit taskUpdated(taskId);
         return true;
     }
@@ -773,14 +868,15 @@ bool DatabaseManager::updateTaskPriority(int taskId, TaskPriority priority)
 
 bool DatabaseManager::updateTaskDueDate(int taskId, const QDateTime &dueDate)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    if (dueDate.isValid())
-        query.addBindValue(dueDate.toString(Qt::ISODate));
-    else
-        query.addBindValue(QVariant());
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            if (dueDate.isValid()) {
+                query.addBindValue(dueDate.toString(Qt::ISODate));
+            } else {
+                query.addBindValue(QVariant());
+            }
+            query.addBindValue(taskId);
+        })) {
         emit taskUpdated(taskId);
         return true;
     }
@@ -789,10 +885,10 @@ bool DatabaseManager::updateTaskDueDate(int taskId, const QDateTime &dueDate)
 
 bool DatabaseManager::archiveTask(int taskId)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET status = 'archived', archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET status = 'archived', archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(taskId);
+        })) {
         emit taskArchived(taskId);
         return true;
     }
@@ -801,11 +897,11 @@ bool DatabaseManager::archiveTask(int taskId)
 
 bool DatabaseManager::updateTaskWorkStatus(int taskId, TaskWorkStatus workStatus)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET work_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(static_cast<int>(workStatus));
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET work_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(static_cast<int>(workStatus));
+            query.addBindValue(taskId);
+        })) {
         emit taskUpdated(taskId);
         return true;
     }
@@ -814,10 +910,10 @@ bool DatabaseManager::updateTaskWorkStatus(int taskId, TaskWorkStatus workStatus
 
 bool DatabaseManager::reactivateTask(int taskId)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET status = 'active', archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET status = 'active', archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(taskId);
+        })) {
         emit taskReactivated(taskId);
         return true;
     }
@@ -826,10 +922,10 @@ bool DatabaseManager::reactivateTask(int taskId)
 
 bool DatabaseManager::deleteTask(int taskId)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(taskId);
-    if (query.exec()) {
+    if (executeWithFtsRecovery([&](QSqlQuery &query) {
+            query.prepare("UPDATE tasks SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP WHERE id = ?");
+            query.addBindValue(taskId);
+        })) {
         emit taskDeleted(taskId);
         return true;
     }
@@ -838,18 +934,18 @@ bool DatabaseManager::deleteTask(int taskId)
 
 bool DatabaseManager::restoreTask(int taskId)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE tasks SET status = 'active', deleted_at = NULL WHERE id = ?");
-    query.addBindValue(taskId);
-    return query.exec();
+    return executeWithFtsRecovery([&](QSqlQuery &query) {
+        query.prepare("UPDATE tasks SET status = 'active', deleted_at = NULL WHERE id = ?");
+        query.addBindValue(taskId);
+    });
 }
 
 bool DatabaseManager::permanentlyDeleteTask(int taskId)
 {
-    QSqlQuery query(m_db);
-    query.prepare("DELETE FROM tasks WHERE id = ?");
-    query.addBindValue(taskId);
-    return query.exec();
+    return executeWithFtsRecovery([&](QSqlQuery &query) {
+        query.prepare("DELETE FROM tasks WHERE id = ?");
+        query.addBindValue(taskId);
+    });
 }
 
 void DatabaseManager::purgeOldDeletedTasks(int maxAgeDays)
@@ -965,33 +1061,30 @@ int DatabaseManager::getSubtaskCount(int taskId)
 
 int DatabaseManager::addSubtask(int taskId, const QString &title)
 {
-    QSqlQuery query(m_db);
-    query.prepare("INSERT INTO subtasks (task_id, title, sort_order) "
-                  "VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?))");
-    query.addBindValue(taskId);
-    query.addBindValue(title);
-    query.addBindValue(taskId);
-    if (query.exec()) {
-        return query.lastInsertId().toInt();
-    }
-    return -1;
+    return executeInsertWithFtsRecovery([&](QSqlQuery &query) {
+        query.prepare("INSERT INTO subtasks (task_id, title, sort_order) "
+                      "VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?))");
+        query.addBindValue(taskId);
+        query.addBindValue(title);
+        query.addBindValue(taskId);
+    });
 }
 
 bool DatabaseManager::toggleSubtask(int subtaskId, bool completed)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE subtasks SET completed = ? WHERE id = ?");
-    query.addBindValue(completed ? 1 : 0);
-    query.addBindValue(subtaskId);
-    return query.exec();
+    return executeWithFtsRecovery([&](QSqlQuery &query) {
+        query.prepare("UPDATE subtasks SET completed = ? WHERE id = ?");
+        query.addBindValue(completed ? 1 : 0);
+        query.addBindValue(subtaskId);
+    });
 }
 
 bool DatabaseManager::deleteSubtask(int subtaskId)
 {
-    QSqlQuery query(m_db);
-    query.prepare("DELETE FROM subtasks WHERE id = ?");
-    query.addBindValue(subtaskId);
-    return query.exec();
+    return executeWithFtsRecovery([&](QSqlQuery &query) {
+        query.prepare("DELETE FROM subtasks WHERE id = ?");
+        query.addBindValue(subtaskId);
+    });
 }
 
 bool DatabaseManager::renameSubtask(int subtaskId, const QString &title)
@@ -1001,20 +1094,20 @@ bool DatabaseManager::renameSubtask(int subtaskId, const QString &title)
 
 bool DatabaseManager::updateSubtaskTitle(int subtaskId, const QString &title)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE subtasks SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(title);
-    query.addBindValue(subtaskId);
-    return query.exec();
+    return executeWithFtsRecovery([&](QSqlQuery &query) {
+        query.prepare("UPDATE subtasks SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+        query.addBindValue(title);
+        query.addBindValue(subtaskId);
+    });
 }
 
 bool DatabaseManager::updateSubtaskContent(int subtaskId, const QString &content)
 {
-    QSqlQuery query(m_db);
-    query.prepare("UPDATE subtasks SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(content);
-    query.addBindValue(subtaskId);
-    return query.exec();
+    return executeWithFtsRecovery([&](QSqlQuery &query) {
+        query.prepare("UPDATE subtasks SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+        query.addBindValue(content);
+        query.addBindValue(subtaskId);
+    });
 }
 
 // --- Content History (Undo/Redo) ---
@@ -1108,8 +1201,8 @@ QList<SearchResult> DatabaseManager::searchItems(const QString &query, int produ
         return results;
     }
 
-    const QString ftsQuery = buildFtsMatchQuery(trimmedQuery);
-    const QString likeQuery = "%" + trimmedQuery + "%";
+    const QStringList tokens = searchTokens(trimmedQuery);
+    const QString ftsQuery = buildFtsMatchQuery(tokens);
 
     auto appendTaskMatches = [&results](QSqlQuery &searchQuery) {
         while (searchQuery.next()) {
@@ -1145,14 +1238,13 @@ QList<SearchResult> DatabaseManager::searchItems(const QString &query, int produ
         QString taskLikeSql =
             "SELECT id, product_id, title, content, priority, status, sort_order, "
             "created_at, updated_at, archived_at, due_date, work_status "
-            "FROM tasks WHERE (title LIKE ? OR content LIKE ?)";
+            "FROM tasks WHERE " + buildLikeSearchClause("title", "content", tokens.size());
         if (productId > 0) {
             taskLikeSql += " AND product_id = ?";
         }
 
         fallbackQuery.prepare(taskLikeSql);
-        fallbackQuery.addBindValue(likeQuery);
-        fallbackQuery.addBindValue(likeQuery);
+        bindLikeSearchTokens(fallbackQuery, tokens);
         if (productId > 0) {
             fallbackQuery.addBindValue(productId);
         }
@@ -1206,14 +1298,13 @@ QList<SearchResult> DatabaseManager::searchItems(const QString &query, int produ
             "  s.id, s.task_id, s.title, s.content, s.completed, s.sort_order, s.created_at, s.updated_at "
             "FROM subtasks s "
             "INNER JOIN tasks t ON t.id = s.task_id "
-            "WHERE (s.title LIKE ? OR s.content LIKE ?)";
+            "WHERE " + buildLikeSearchClause("s.title", "s.content", tokens.size());
         if (productId > 0) {
             subtaskLikeSql += " AND t.product_id = ?";
         }
 
         fallbackQuery.prepare(subtaskLikeSql);
-        fallbackQuery.addBindValue(likeQuery);
-        fallbackQuery.addBindValue(likeQuery);
+        bindLikeSearchTokens(fallbackQuery, tokens);
         if (productId > 0) {
             fallbackQuery.addBindValue(productId);
         }

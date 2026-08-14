@@ -80,6 +80,7 @@ private:
     QList<DisplayRow> m_displayRows;
     QSet<int> m_expandedTasks;
     EditorTarget m_activeTarget;
+    bool m_searchMode = false;
     int m_currentProductId = -1;
     TaskStatus m_currentStatus = TaskStatus::Active;
 };

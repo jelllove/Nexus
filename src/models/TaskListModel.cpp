@@ -79,9 +79,9 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
         case IsSubTaskRole:
             return false;
         case HasSubTasksRole:
-            return DatabaseManager::instance().getSubtaskCount(t.id) > 0;
+            return !m_searchMode && DatabaseManager::instance().getSubtaskCount(t.id) > 0;
         case IsExpandedRole:
-            return m_expandedTasks.contains(t.id);
+            return !m_searchMode && m_expandedTasks.contains(t.id);
         case IsActiveTaskRole:
             return m_activeTarget == EditorTarget::task(t.id);
     }
@@ -92,6 +92,7 @@ void TaskListModel::loadTasks(int productId, TaskStatus status)
 {
     m_currentProductId = productId;
     m_currentStatus = status;
+    m_searchMode = false;
     beginResetModel();
     m_tasks = DatabaseManager::instance().getTasksForProduct(productId, status);
     rebuildDisplayRows();
@@ -102,6 +103,7 @@ void TaskListModel::loadDeletedTasks()
 {
     m_currentProductId = -1;
     m_currentStatus = TaskStatus::Deleted;
+    m_searchMode = false;
     beginResetModel();
     m_tasks = DatabaseManager::instance().getDeletedTasks();
     rebuildDisplayRows();
@@ -111,6 +113,7 @@ void TaskListModel::loadDeletedTasks()
 void TaskListModel::loadSearchResults(const QList<SearchResult> &results)
 {
     m_currentProductId = -1;
+    m_searchMode = true;
     beginResetModel();
     m_tasks.clear();
     m_displayRows.clear();

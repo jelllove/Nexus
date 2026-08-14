@@ -224,6 +224,25 @@ private slots:
         QVERIFY(database.getSubtask(1).completed);
     }
 
+    void searchRefreshKeepsCurrentQueryResults()
+    {
+        auto &database = DatabaseManager::instance();
+        QVERIFY(database.updateSubtaskContent(1, "<p>refresh-search-key</p>"));
+
+        TaskPane pane;
+        pane.showSearchResults("refresh-search-key",
+                               database.searchItems("refresh-search-key"));
+
+        auto *model = pane.findChild<TaskListModel *>();
+        QVERIFY(model);
+        QCOMPARE(model->rowCount(), 2);
+
+        pane.refreshCurrentView();
+        QCOMPARE(model->rowCount(), 2);
+        QCOMPARE(model->targetAt(0), EditorTarget::task(1));
+        QCOMPARE(model->targetAt(1), EditorTarget::subtask(1));
+    }
+
     void subtaskDataCascadesOnPermanentParentDeletion()
     {
         auto &database = DatabaseManager::instance();
@@ -261,6 +280,16 @@ private slots:
             database.searchItems("fallback-child-key");
         QCOMPARE(results.size(), 1);
         QCOMPARE(results.first().target(), EditorTarget::subtask(1));
+
+        QVERIFY(database.updateSubtaskContent(1, "<p>fallback-write-key</p>"));
+        QVERIFY(database.toggleSubtask(1, true));
+        QCOMPARE(database.getSubtask(1).content, QString("<p>fallback-write-key</p>"));
+        QVERIFY(database.getSubtask(1).completed);
+
+        const QList<SearchResult> updatedResults =
+            database.searchItems("fallback-write-key");
+        QCOMPARE(updatedResults.size(), 1);
+        QCOMPARE(updatedResults.first().target(), EditorTarget::subtask(1));
     }
 
     void cleanupTestCase()

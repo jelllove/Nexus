@@ -17,7 +17,7 @@ public:
 
     void loadTasks(int productId);
     void showArchived(bool archived);
-    void showSearchResults(const QList<SearchResult> &results);
+    void showSearchResults(const QString &query, const QList<SearchResult> &results);
     void refreshCurrentView();
     void setActiveTarget(const EditorTarget &target);
     EditorTarget activeTarget() const;
@@ -62,4 +62,5 @@ private:
     bool m_showingArchived = false;
     bool m_showingDeleted = false;
     bool m_showingSearchResults = false;
+    QString m_currentSearchQuery;
 };
