@@ -153,4 +153,21 @@ if(BUILD_TESTING)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_PREFIX_PATH}/bin"
     )
+
+    add_executable(NexusFreshDatabaseTests
+        tests/FreshDatabaseTests.cpp
+        src/db/DatabaseManager.cpp
+    )
+    target_include_directories(NexusFreshDatabaseTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(NexusFreshDatabaseTests PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Sql
+        Qt6::Test
+    )
+
+    add_test(NAME NexusFreshDatabaseTests COMMAND NexusFreshDatabaseTests)
+    set_tests_properties(NexusFreshDatabaseTests PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_PREFIX_PATH}/bin"
+    )
 endif()

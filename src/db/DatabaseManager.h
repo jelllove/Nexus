@@ -50,16 +50,22 @@ public:
 
     // Sub-task CRUD
     QList<SubTask> getSubtasks(int taskId);
+    SubTask getSubtask(int subtaskId);
     int getSubtaskCount(int taskId);
     int addSubtask(int taskId, const QString &title);
     bool toggleSubtask(int subtaskId, bool completed);
     bool deleteSubtask(int subtaskId);
     bool renameSubtask(int subtaskId, const QString &title);
+    bool updateSubtaskTitle(int subtaskId, const QString &title);
+    bool updateSubtaskContent(int subtaskId, const QString &content);
 
     // Content history (undo/redo)
-    void saveContentSnapshot(int taskId, const QString &content);
+    bool saveContentSnapshot(int taskId, const QString &content);
     QList<QString> getContentHistory(int taskId);
     void cleanupOldHistory(int taskId, int maxAgeMinutes = 60);
+    bool saveSubtaskContentSnapshot(int subtaskId, const QString &content);
+    QList<QString> getSubtaskContentHistory(int subtaskId);
+    void cleanupOldSubtaskHistory(int subtaskId, int maxAgeMinutes = 60);
 
     // Search
     QList<Task> searchTasks(const QString &query, int productId = -1);

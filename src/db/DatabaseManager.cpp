@@ -9,6 +9,25 @@
 #include <QDateTime>
 #include <QVariant>
 
+namespace {
+bool tableHasColumn(QSqlDatabase &database, const QString &tableName, const QString &columnName)
+{
+    QSqlQuery query(database);
+    if (!query.exec(QString("PRAGMA table_info(%1)").arg(tableName))) {
+        qCritical() << "Failed to inspect table" << tableName << ":" << query.lastError().text();
+        return false;
+    }
+
+    while (query.next()) {
+        if (query.value(1).toString() == columnName) {
+            return true;
+        }
+    }
+
+    return false;
+}
+}
+
 DatabaseManager& DatabaseManager::instance()
 {
     static DatabaseManager inst;
@@ -41,10 +60,21 @@ bool DatabaseManager::initialize(const QString &dbPath)
 
     qInfo() << "Database opened at:" << path;
 
-    if (!createTables() || !createFtsTables())
+    if (!createTables()) {
+        qCritical() << "Failed to create database tables.";
         return false;
+    }
 
-    migrateDatabase();
+    if (!migrateDatabase()) {
+        qCritical() << "Failed to migrate database schema.";
+        return false;
+    }
+
+    if (!createFtsTables()) {
+        qCritical() << "Failed to create database search tables.";
+        return false;
+    }
+
     return true;
 }
 
@@ -97,6 +127,34 @@ bool DatabaseManager::createTables()
         return false;
     }
 
+    if (!query.exec(
+        "CREATE TABLE IF NOT EXISTS subtasks ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  task_id INTEGER NOT NULL,"
+        "  title TEXT NOT NULL DEFAULT '',"
+        "  content TEXT NOT NULL DEFAULT '',"
+        "  completed INTEGER DEFAULT 0,"
+        "  sort_order INTEGER DEFAULT 0,"
+        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE"
+        ")")) {
+        qCritical() << "Failed to create subtasks table:" << query.lastError().text();
+        return false;
+    }
+
+    if (!query.exec(
+        "CREATE TABLE IF NOT EXISTS subtask_content_history ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  subtask_id INTEGER NOT NULL,"
+        "  content TEXT NOT NULL,"
+        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY (subtask_id) REFERENCES subtasks(id) ON DELETE CASCADE"
+        ")")) {
+        qCritical() << "Failed to create subtask_content_history table:" << query.lastError().text();
+        return false;
+    }
+
     // Settings table
     if (!query.exec(
         "CREATE TABLE IF NOT EXISTS settings ("
@@ -125,19 +183,33 @@ bool DatabaseManager::createFtsTables()
     }
 
     // Triggers to keep FTS in sync
-    query.exec(
+    if (!query.exec(
         "CREATE TRIGGER IF NOT EXISTS tasks_ai AFTER INSERT ON tasks BEGIN "
         "  INSERT INTO tasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
-        "END");
-    query.exec(
+        "END")) {
+        qCritical() << "Failed to create tasks_ai trigger:" << query.lastError().text();
+        return false;
+    }
+    if (!query.exec(
         "CREATE TRIGGER IF NOT EXISTS tasks_ad AFTER DELETE ON tasks BEGIN "
         "  INSERT INTO tasks_fts(tasks_fts, rowid, title, content) VALUES ('delete', old.id, old.title, old.content); "
-        "END");
-    query.exec(
+        "END")) {
+        qCritical() << "Failed to create tasks_ad trigger:" << query.lastError().text();
+        return false;
+    }
+    if (!query.exec(
         "CREATE TRIGGER IF NOT EXISTS tasks_au AFTER UPDATE ON tasks BEGIN "
         "  INSERT INTO tasks_fts(tasks_fts, rowid, title, content) VALUES ('delete', old.id, old.title, old.content); "
         "  INSERT INTO tasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
-        "END");
+        "END")) {
+        qCritical() << "Failed to create tasks_au trigger:" << query.lastError().text();
+        return false;
+    }
+
+    if (!query.exec("INSERT INTO tasks_fts(tasks_fts) VALUES ('rebuild')")) {
+        qCritical() << "Failed to rebuild tasks FTS index:" << query.lastError().text();
+        return false;
+    }
 
     return true;
 }
@@ -260,6 +332,100 @@ bool DatabaseManager::migrateDatabase()
         qInfo() << "Migration v6: created subtasks table";
         setSetting("db_version", "6");
         dbVersion = 6;
+    }
+
+    if (dbVersion < 7) {
+        const bool hasSubtaskContent = tableHasColumn(m_db, "subtasks", "content");
+        const bool hasSubtaskUpdatedAt = tableHasColumn(m_db, "subtasks", "updated_at");
+
+        if (!hasSubtaskContent || !hasSubtaskUpdatedAt) {
+            if (!m_db.transaction()) {
+                qCritical() << "Failed to start v7 migration transaction:" << m_db.lastError().text();
+                return false;
+            }
+
+            auto rollbackWithError = [this, &query](const QString &message) {
+                qCritical() << message << query.lastError().text();
+                m_db.rollback();
+                return false;
+            };
+
+            if (!query.exec(
+                "CREATE TABLE subtasks_v7 ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  task_id INTEGER NOT NULL,"
+                "  title TEXT NOT NULL DEFAULT '',"
+                "  content TEXT NOT NULL DEFAULT '',"
+                "  completed INTEGER DEFAULT 0,"
+                "  sort_order INTEGER DEFAULT 0,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE"
+                ")")) {
+                return rollbackWithError("Failed to create subtasks_v7 table:");
+            }
+
+            if (!query.exec(
+                "INSERT INTO subtasks_v7 "
+                "    (id, task_id, title, content, completed, sort_order, created_at, updated_at) "
+                "SELECT id, task_id, title, '', completed, sort_order, created_at, created_at "
+                "FROM subtasks")) {
+                return rollbackWithError("Failed to copy subtasks into v7 schema:");
+            }
+
+            if (!query.exec("DROP TABLE subtasks")) {
+                return rollbackWithError("Failed to drop legacy subtasks table:");
+            }
+
+            if (!query.exec("ALTER TABLE subtasks_v7 RENAME TO subtasks")) {
+                return rollbackWithError("Failed to rename subtasks_v7 table:");
+            }
+
+            if (!query.exec(
+                "CREATE TABLE IF NOT EXISTS subtask_content_history ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  subtask_id INTEGER NOT NULL,"
+                "  content TEXT NOT NULL,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  FOREIGN KEY (subtask_id) REFERENCES subtasks(id) ON DELETE CASCADE"
+                ")")) {
+                return rollbackWithError("Failed to create subtask_content_history table:");
+            }
+
+            query.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', ?)");
+            query.addBindValue(QStringLiteral("7"));
+            if (!query.exec()) {
+                return rollbackWithError("Failed to update db_version to 7:");
+            }
+
+            if (!m_db.commit()) {
+                qCritical() << "Failed to commit v7 migration:" << m_db.lastError().text();
+                m_db.rollback();
+                return false;
+            }
+        } else {
+            if (!query.exec(
+                "CREATE TABLE IF NOT EXISTS subtask_content_history ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  subtask_id INTEGER NOT NULL,"
+                "  content TEXT NOT NULL,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  FOREIGN KEY (subtask_id) REFERENCES subtasks(id) ON DELETE CASCADE"
+                ")")) {
+                qCritical() << "Failed to create subtask_content_history table:" << query.lastError().text();
+                return false;
+            }
+
+            query.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', ?)");
+            query.addBindValue(QStringLiteral("7"));
+            if (!query.exec()) {
+                qCritical() << "Failed to update db_version to 7:" << query.lastError().text();
+                return false;
+            }
+        }
+
+        qInfo() << "Migration v7: enabled subtask note storage";
+        dbVersion = 7;
     }
 
     return true;
@@ -640,7 +806,7 @@ QList<SubTask> DatabaseManager::getSubtasks(int taskId)
 {
     QList<SubTask> subtasks;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, task_id, title, completed, sort_order FROM subtasks "
+    query.prepare("SELECT id, task_id, title, content, completed, sort_order, created_at, updated_at FROM subtasks "
                   "WHERE task_id = ? ORDER BY sort_order ASC, id ASC");
     query.addBindValue(taskId);
     query.exec();
@@ -649,11 +815,35 @@ QList<SubTask> DatabaseManager::getSubtasks(int taskId)
         st.id = query.value(0).toInt();
         st.taskId = query.value(1).toInt();
         st.title = query.value(2).toString();
-        st.completed = query.value(3).toBool();
-        st.sortOrder = query.value(4).toInt();
+        st.content = query.value(3).toString();
+        st.completed = query.value(4).toBool();
+        st.sortOrder = query.value(5).toInt();
+        st.createdAt = query.value(6).toDateTime();
+        st.updatedAt = query.value(7).toDateTime();
         subtasks.append(st);
     }
     return subtasks;
+}
+
+SubTask DatabaseManager::getSubtask(int subtaskId)
+{
+    SubTask subtask;
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT id, task_id, title, content, completed, sort_order, created_at, updated_at "
+        "FROM subtasks WHERE id = ?");
+    query.addBindValue(subtaskId);
+    if (query.exec() && query.next()) {
+        subtask.id = query.value(0).toInt();
+        subtask.taskId = query.value(1).toInt();
+        subtask.title = query.value(2).toString();
+        subtask.content = query.value(3).toString();
+        subtask.completed = query.value(4).toBool();
+        subtask.sortOrder = query.value(5).toInt();
+        subtask.createdAt = query.value(6).toDateTime();
+        subtask.updatedAt = query.value(7).toDateTime();
+    }
+    return subtask;
 }
 
 int DatabaseManager::getSubtaskCount(int taskId)
@@ -700,16 +890,30 @@ bool DatabaseManager::deleteSubtask(int subtaskId)
 
 bool DatabaseManager::renameSubtask(int subtaskId, const QString &title)
 {
+    return updateSubtaskTitle(subtaskId, title);
+}
+
+bool DatabaseManager::updateSubtaskTitle(int subtaskId, const QString &title)
+{
     QSqlQuery query(m_db);
-    query.prepare("UPDATE subtasks SET title = ? WHERE id = ?");
+    query.prepare("UPDATE subtasks SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
     query.addBindValue(title);
+    query.addBindValue(subtaskId);
+    return query.exec();
+}
+
+bool DatabaseManager::updateSubtaskContent(int subtaskId, const QString &content)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE subtasks SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(content);
     query.addBindValue(subtaskId);
     return query.exec();
 }
 
 // --- Content History (Undo/Redo) ---
 
-void DatabaseManager::saveContentSnapshot(int taskId, const QString &content)
+bool DatabaseManager::saveContentSnapshot(int taskId, const QString &content)
 {
     // Clean up old snapshots first
     cleanupOldHistory(taskId);
@@ -718,7 +922,7 @@ void DatabaseManager::saveContentSnapshot(int taskId, const QString &content)
     query.prepare("INSERT INTO task_content_history (task_id, content) VALUES (?, ?)");
     query.addBindValue(taskId);
     query.addBindValue(content);
-    query.exec();
+    return query.exec();
 }
 
 QList<QString> DatabaseManager::getContentHistory(int taskId)
@@ -745,6 +949,45 @@ void DatabaseManager::cleanupOldHistory(int taskId, int maxAgeMinutes)
         "DELETE FROM task_content_history "
         "WHERE task_id = ? AND created_at < datetime('now', '-' || ? || ' minutes')");
     query.addBindValue(taskId);
+    query.addBindValue(maxAgeMinutes);
+    query.exec();
+}
+
+bool DatabaseManager::saveSubtaskContentSnapshot(int subtaskId, const QString &content)
+{
+    cleanupOldSubtaskHistory(subtaskId);
+
+    QSqlQuery query(m_db);
+    query.prepare("INSERT INTO subtask_content_history (subtask_id, content) VALUES (?, ?)");
+    query.addBindValue(subtaskId);
+    query.addBindValue(content);
+    return query.exec();
+}
+
+QList<QString> DatabaseManager::getSubtaskContentHistory(int subtaskId)
+{
+    QList<QString> history;
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT content FROM subtask_content_history "
+        "WHERE subtask_id = ? AND created_at >= datetime('now', '-60 minutes') "
+        "ORDER BY id ASC");
+    query.addBindValue(subtaskId);
+    query.exec();
+
+    while (query.next()) {
+        history.append(query.value(0).toString());
+    }
+    return history;
+}
+
+void DatabaseManager::cleanupOldSubtaskHistory(int subtaskId, int maxAgeMinutes)
+{
+    QSqlQuery query(m_db);
+    query.prepare(
+        "DELETE FROM subtask_content_history "
+        "WHERE subtask_id = ? AND created_at < datetime('now', '-' || ? || ' minutes')");
+    query.addBindValue(subtaskId);
     query.addBindValue(maxAgeMinutes);
     query.exec();
 }
