@@ -35,6 +35,7 @@ private slots:
     void onSummarizeRequested(const EditorTarget &target, const QString &content);
     void onSummaryGenerated(const QString &summary);
     void onAIError(const QString &message);
+    void onExportTaskSummaryRequested();
     void showSettings();
     void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl, const QString &releaseNotes);
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);

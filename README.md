@@ -12,6 +12,7 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **Rich Text Editor** — TipTap-based WYSIWYG editor embedded via QWebEngineView, supporting headings, lists, code blocks, images, and more for both task and subtask notes
 - **Task Cards** — Visual task cards with priority badges (P0–P3), color-coded priority bars, created/modified timestamps, and due-date progress bars with cute animal icons
 - **Subtask Notes** — Select a subtask to edit its own rich-text note in the main editor, with autosave, images, AI title generation, and AI summaries
+- **Markdown Task Export** — Export selected active tasks from the current product to a Markdown file with work status, title, and short note summary
 - **Due Dates & Progress** — Set due dates on tasks; a day-based progress bar shows time elapsed with green/orange/red color coding
 - **Full-Text Search** — SQLite FTS5-powered instant search across task and subtask titles and notes, with LIKE fallback
 - **Layer-Aware Search** — Search main-task and subtask titles and notes, then open the matching layer directly

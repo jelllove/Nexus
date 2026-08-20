@@ -1,13 +1,20 @@
 #include "MainWindow.h"
 #include "ui/SettingsDialog.h"
+#include "ui/ExportTaskSummaryDialog.h"
 #include "services/AIService.h"
 #include "services/UpdateService.h"
 #include "platform/GlobalHotkey.h"
 #include "db/DatabaseManager.h"
+#include "export/TaskSummaryMarkdownExporter.h"
 #include <QCloseEvent>
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
+#include <QFileDialog>
+#include <QFile>
+#include <QSet>
+#include <QStringConverter>
+#include <QTextStream>
 #include <QVBoxLayout>
 #include <QMessageBox>
 #include <QStatusBar>
@@ -119,6 +126,11 @@ void MainWindow::setupMenuBar()
     QAction *settingsAction = fileMenu->addAction("&Settings...");
     settingsAction->setShortcut(QKeySequence("Ctrl+,"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::showSettings);
+
+    QAction *exportTaskSummaryAction = fileMenu->addAction("Export Task Summary (.md)...");
+    exportTaskSummaryAction->setShortcut(QKeySequence("Ctrl+Shift+E"));
+    connect(exportTaskSummaryAction, &QAction::triggered,
+            this, &MainWindow::onExportTaskSummaryRequested);
 
     fileMenu->addSeparator();
 
@@ -486,6 +498,93 @@ void MainWindow::showSettings()
 {
     SettingsDialog dialog(this);
     dialog.exec();
+}
+
+void MainWindow::onExportTaskSummaryRequested()
+{
+    const int productId = m_productPane->selectedProductId();
+    if (productId <= 0) {
+        QMessageBox::information(this, "Export Task Summary",
+                                 "Please select a product first.");
+        return;
+    }
+
+    auto &database = DatabaseManager::instance();
+    const QList<Task> activeTasks =
+        database.getTasksForProduct(productId, TaskStatus::Active);
+    if (activeTasks.isEmpty()) {
+        QMessageBox::information(this, "Export Task Summary",
+                                 "No active tasks are available to export.");
+        return;
+    }
+
+    ExportTaskSummaryDialog dialog(activeTasks, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        statusBar()->showMessage("Task summary export canceled.", 3000);
+        return;
+    }
+
+    const QList<int> selectedIds = dialog.selectedTaskIds();
+    if (validateTaskSummaryExportInputs(productId, activeTasks, selectedIds)
+        == TaskSummaryExportIssue::NoTaskSelected) {
+        QMessageBox::information(this, "Export Task Summary",
+                                 "Please select at least one task to export.");
+        return;
+    }
+
+    const QSet<int> selectedSet(selectedIds.begin(), selectedIds.end());
+    QList<Task> selectedTasks;
+    selectedTasks.reserve(selectedSet.size());
+    for (const Task &task : activeTasks) {
+        if (selectedSet.contains(task.id)) {
+            selectedTasks.append(task);
+        }
+    }
+
+    if (selectedTasks.isEmpty()) {
+        QMessageBox::information(this, "Export Task Summary",
+                                 "The selected tasks are no longer available.");
+        return;
+    }
+
+    const Product product = database.getProduct(productId);
+    const QString productName =
+        product.id > 0 ? product.name : QStringLiteral("Unknown Product");
+    const QDateTime now = QDateTime::currentDateTime();
+    const QString markdown =
+        buildTaskSummaryMarkdown(productName, now, selectedTasks, 120);
+
+    const QString defaultFileName =
+        QString("task-summary-%1.md").arg(now.toString("yyyyMMdd-HHmm"));
+    const QString filePath = QFileDialog::getSaveFileName(
+        this,
+        "Export Task Summary",
+        defaultFileName,
+        "Markdown Files (*.md)");
+    if (filePath.isEmpty()) {
+        statusBar()->showMessage("Task summary export canceled.", 3000);
+        return;
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this,
+                             "Export Task Summary",
+                             QString("Failed to write file:\n%1\n\n%2")
+                                 .arg(filePath, file.errorString()));
+        return;
+    }
+
+    QTextStream stream(&file);
+    stream.setEncoding(QStringConverter::Utf8);
+    stream << markdown;
+    file.close();
+
+    statusBar()->showMessage(
+        QString("Exported %1 task(s) to %2")
+            .arg(static_cast<int>(selectedTasks.size()))
+            .arg(filePath),
+        5000);
 }
 
 void MainWindow::checkForUpdates()

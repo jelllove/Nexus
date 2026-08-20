@@ -32,12 +32,14 @@ set(SOURCES
     src/main.cpp
     src/app/MainWindow.cpp
     src/db/DatabaseManager.cpp
+    src/export/TaskSummaryMarkdownExporter.cpp
     src/models/ProductListModel.cpp
     src/models/TaskListModel.cpp
     src/ui/ProductPane.cpp
     src/ui/TaskPane.cpp
     src/ui/TaskCardDelegate.cpp
     src/ui/EditorPane.cpp
+    src/ui/ExportTaskSummaryDialog.cpp
     src/ui/SearchBar.cpp
     src/ui/SettingsDialog.cpp
     src/editor/EditorBridge.cpp
@@ -50,6 +52,7 @@ set(SOURCES
 set(HEADERS
     src/app/MainWindow.h
     src/db/DatabaseManager.h
+    src/export/TaskSummaryMarkdownExporter.h
     src/models/EditorTarget.h
     src/models/Product.h
     src/models/Task.h
@@ -60,6 +63,7 @@ set(HEADERS
     src/ui/TaskPane.h
     src/ui/TaskCardDelegate.h
     src/ui/EditorPane.h
+    src/ui/ExportTaskSummaryDialog.h
     src/ui/SearchBar.h
     src/ui/SettingsDialog.h
     src/editor/EditorBridge.h
@@ -168,6 +172,25 @@ if(BUILD_TESTING)
 
     add_test(NAME NexusFreshDatabaseTests COMMAND NexusFreshDatabaseTests)
     set_tests_properties(NexusFreshDatabaseTests PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_PREFIX_PATH}/bin"
+    )
+
+    add_executable(NexusTaskSummaryExportTests
+        tests/TaskSummaryMarkdownExporterTests.cpp
+        src/export/TaskSummaryMarkdownExporter.cpp
+        src/ui/ExportTaskSummaryDialog.cpp
+    )
+    target_include_directories(NexusTaskSummaryExportTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(NexusTaskSummaryExportTests PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Test
+    )
+
+    add_test(NAME NexusTaskSummaryExportTests COMMAND NexusTaskSummaryExportTests)
+    set_tests_properties(NexusTaskSummaryExportTests PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_PREFIX_PATH}/bin"
     )
 endif()
