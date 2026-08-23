@@ -548,14 +548,28 @@ bool MainWindow::promptTaskSelectionDialog(
     const QHash<int, QString> &productNames,
     QList<ExportTaskItem> &selectedExportItems)
 {
+    enum NodeType {
+        ProductNode = 1,
+        MainTaskNode = 2,
+        SubTaskNode = 3
+    };
+
+    constexpr int RoleNodeType = Qt::UserRole + 20;
+    constexpr int RoleId = Qt::UserRole;
+    constexpr int RoleProductId = Qt::UserRole + 1;
+    constexpr int RoleTitle = Qt::UserRole + 2;
+    constexpr int RoleSubtaskCompleted = Qt::UserRole + 3;
+    constexpr int RoleWorkStatusText = Qt::UserRole + 4;
+    constexpr int RoleWorkStatusIcon = Qt::UserRole + 5;
+
     QDialog dialog(this);
     dialog.setWindowTitle("Export Tasks - Step 2/2");
     dialog.setMinimumSize(640, 500);
 
     auto *layout = new QVBoxLayout(&dialog);
     auto *hint = new QLabel(
-        "Select the main tasks you want to export.\n"
-        "Sub tasks for selected main tasks are included automatically.",
+        "Select what to export in a Product → Main Task → Sub Task tree.\n"
+        "You can choose Product/Main/Sub levels directly.",
         &dialog);
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -572,19 +586,88 @@ bool MainWindow::promptTaskSelectionDialog(
             productId, QString("Product %1").arg(productId));
         auto *productItem = new QTreeWidgetItem(
             tree, {QString::fromUtf8("📚 ") + productName});
-        productItem->setFlags(productItem->flags() & ~Qt::ItemIsSelectable);
+        productItem->setFlags((productItem->flags() | Qt::ItemIsUserCheckable) &
+                              ~Qt::ItemIsSelectable);
+        productItem->setCheckState(0, Qt::Unchecked);
+        productItem->setData(0, RoleNodeType, ProductNode);
+        productItem->setData(0, RoleProductId, productId);
 
         for (const Task &task : it.value()) {
             const QString title = task.title.trimmed().isEmpty() ? "Untitled Task" : task.title;
             auto *taskItem = new QTreeWidgetItem(
                 productItem, {Task::workStatusIcon(task.workStatus) + " " + title});
-            taskItem->setData(0, Qt::UserRole, task.id);
-            taskItem->setData(0, Qt::UserRole + 1, productId);
+            taskItem->setData(0, RoleNodeType, MainTaskNode);
+            taskItem->setData(0, RoleId, task.id);
+            taskItem->setData(0, RoleProductId, productId);
+            taskItem->setData(0, RoleTitle, task.title);
+            taskItem->setData(0, RoleWorkStatusText, Task::workStatusToString(task.workStatus));
+            taskItem->setData(0, RoleWorkStatusIcon, Task::workStatusIcon(task.workStatus));
             taskItem->setCheckState(0, Qt::Unchecked);
-            taskItem->setFlags(taskItem->flags() | Qt::ItemIsUserCheckable);
+            taskItem->setFlags((taskItem->flags() | Qt::ItemIsUserCheckable) &
+                               ~Qt::ItemIsSelectable);
+
+            const QList<SubTask> subtasks = DatabaseManager::instance().getSubtasks(task.id);
+            for (const SubTask &subtask : subtasks) {
+                const QString subTitle = subtask.title.trimmed().isEmpty()
+                    ? QString("Untitled sub task")
+                    : subtask.title;
+                auto *subtaskItem = new QTreeWidgetItem(
+                    taskItem,
+                    {QString("%1 %2").arg(subtask.completed ? "✅" : "⬜", subTitle)});
+                subtaskItem->setData(0, RoleNodeType, SubTaskNode);
+                subtaskItem->setData(0, RoleId, subtask.id);
+                subtaskItem->setData(0, RoleTitle, subtask.title);
+                subtaskItem->setData(0, RoleSubtaskCompleted, subtask.completed);
+                subtaskItem->setCheckState(0, Qt::Unchecked);
+                subtaskItem->setFlags((subtaskItem->flags() | Qt::ItemIsUserCheckable) &
+                                      ~Qt::ItemIsSelectable);
+            }
         }
     }
     tree->expandAll();
+    tree->setUniformRowHeights(true);
+
+    bool syncingCheckState = false;
+    connect(tree, &QTreeWidget::itemChanged, tree,
+            [&, tree](QTreeWidgetItem *item, int column) {
+                Q_UNUSED(column);
+                if (syncingCheckState) {
+                    return;
+                }
+
+                syncingCheckState = true;
+                const Qt::CheckState state = item->checkState(0);
+                if (state != Qt::PartiallyChecked) {
+                    for (int i = 0; i < item->childCount(); ++i) {
+                        item->child(i)->setCheckState(0, state);
+                    }
+                }
+
+                QTreeWidgetItem *parent = item->parent();
+                while (parent) {
+                    int checkedChildren = 0;
+                    int partialChildren = 0;
+                    const int childCount = parent->childCount();
+                    for (int i = 0; i < childCount; ++i) {
+                        const Qt::CheckState childState = parent->child(i)->checkState(0);
+                        if (childState == Qt::Checked) {
+                            checkedChildren++;
+                        } else if (childState == Qt::PartiallyChecked) {
+                            partialChildren++;
+                        }
+                    }
+
+                    if (checkedChildren == childCount) {
+                        parent->setCheckState(0, Qt::Checked);
+                    } else if (checkedChildren == 0 && partialChildren == 0) {
+                        parent->setCheckState(0, Qt::Unchecked);
+                    } else {
+                        parent->setCheckState(0, Qt::PartiallyChecked);
+                    }
+                    parent = parent->parent();
+                }
+                syncingCheckState = false;
+            });
 
     auto *actionRow = new QHBoxLayout();
     auto *selectAllBtn = new QPushButton("Select All", &dialog);
@@ -596,18 +679,12 @@ bool MainWindow::promptTaskSelectionDialog(
 
     connect(selectAllBtn, &QPushButton::clicked, tree, [tree]() {
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
-            auto *productItem = tree->topLevelItem(i);
-            for (int j = 0; j < productItem->childCount(); ++j) {
-                productItem->child(j)->setCheckState(0, Qt::Checked);
-            }
+            tree->topLevelItem(i)->setCheckState(0, Qt::Checked);
         }
     });
     connect(clearAllBtn, &QPushButton::clicked, tree, [tree]() {
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
-            auto *productItem = tree->topLevelItem(i);
-            for (int j = 0; j < productItem->childCount(); ++j) {
-                productItem->child(j)->setCheckState(0, Qt::Unchecked);
-            }
+            tree->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
         }
     });
 
@@ -624,14 +701,38 @@ bool MainWindow::promptTaskSelectionDialog(
     selectedExportItems.clear();
     for (int i = 0; i < tree->topLevelItemCount(); ++i) {
         auto *productItem = tree->topLevelItem(i);
+        const int productId = productItem->data(0, RoleProductId).toInt();
+        const QString productName = productNames.value(productId);
         for (int j = 0; j < productItem->childCount(); ++j) {
             auto *taskItem = productItem->child(j);
-            if (taskItem->checkState(0) != Qt::Checked) {
+            if (taskItem->data(0, RoleNodeType).toInt() != MainTaskNode) {
                 continue;
             }
 
-            const int taskId = taskItem->data(0, Qt::UserRole).toInt();
-            const int productId = taskItem->data(0, Qt::UserRole + 1).toInt();
+            const int taskId = taskItem->data(0, RoleId).toInt();
+            const Qt::CheckState taskState = taskItem->checkState(0);
+            QList<ExportSubTaskItem> selectedSubtasks;
+            for (int k = 0; k < taskItem->childCount(); ++k) {
+                auto *subtaskItem = taskItem->child(k);
+                if (subtaskItem->data(0, RoleNodeType).toInt() != SubTaskNode) {
+                    continue;
+                }
+                if (subtaskItem->checkState(0) != Qt::Checked) {
+                    continue;
+                }
+                selectedSubtasks.append({
+                    subtaskItem->data(0, RoleTitle).toString(),
+                    subtaskItem->data(0, RoleSubtaskCompleted).toBool()
+                });
+            }
+
+            const bool shouldExportTask = (taskState == Qt::Checked ||
+                                           taskState == Qt::PartiallyChecked ||
+                                           !selectedSubtasks.isEmpty());
+            if (!shouldExportTask) {
+                continue;
+            }
+
             const QList<Task> productTasks = tasksByProduct.value(productId);
             for (const Task &task : productTasks) {
                 if (task.id != taskId) {
@@ -644,11 +745,9 @@ bool MainWindow::promptTaskSelectionDialog(
                 exportItem.title = task.title;
                 exportItem.contentHtml = task.content;
                 exportItem.updatedAt = task.updatedAt;
-
-                const QList<SubTask> subtasks = DatabaseManager::instance().getSubtasks(task.id);
-                for (const SubTask &subtask : subtasks) {
-                    exportItem.subtasks.append({subtask.title, subtask.completed});
-                }
+                exportItem.workStatusText = taskItem->data(0, RoleWorkStatusText).toString();
+                exportItem.workStatusIcon = taskItem->data(0, RoleWorkStatusIcon).toString();
+                exportItem.subtasks = selectedSubtasks;
 
                 selectedExportItems.append(exportItem);
                 break;

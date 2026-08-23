@@ -17,6 +17,8 @@ struct ExportTaskItem {
     QDateTime updatedAt;
     QList<ExportSubTaskItem> subtasks;
     QString simpleDescription;
+    QString workStatusText;
+    QString workStatusIcon;
 };
 
 class TaskExportService
@@ -26,4 +28,3 @@ public:
     static QString fallbackSimpleDescription(const QString &html, int maxChars = 120);
     static QString buildMarkdown(const QList<ExportTaskItem> &tasks, const QDateTime &exportedAt);
 };
-
