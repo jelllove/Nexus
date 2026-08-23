@@ -35,6 +35,7 @@ set(SOURCES
     src/services/AIService.cpp
     src/services/ImageManager.cpp
     src/services/UpdateService.cpp
+    src/services/TaskExportService.cpp
     src/platform/GlobalHotkey.cpp
 )
 
@@ -55,6 +56,7 @@ set(HEADERS
     src/services/AIService.h
     src/services/ImageManager.h
     src/services/UpdateService.h
+    src/services/TaskExportService.h
     src/platform/GlobalHotkey.h
 )
 

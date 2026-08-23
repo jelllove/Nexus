@@ -47,16 +47,25 @@ QNetworkRequest AIService::buildRequest(const QString &endpoint, const QString &
 }
 
 void AIService::sendChatRequest(const QString &systemPrompt, const QString &userPrompt,
-                                 int maxTokens, double temperature,
-                                 std::function<void(const QString &)> onSuccess)
+                                int maxTokens, double temperature,
+                                std::function<void(const QString &)> onSuccess,
+                                std::function<void(const QString &)> onFailure)
 {
+    auto fail = [this, onFailure](const QString &message) {
+        if (onFailure) {
+            onFailure(message);
+        } else {
+            emit error(message);
+        }
+    };
+
     auto &db = DatabaseManager::instance();
     QString endpoint = db.getSetting("ai_endpoint");
     QString apiKey = db.getSetting("ai_api_key");
     QString model = db.getSetting("ai_model", "gpt-4o-mini");
 
     if (endpoint.isEmpty() || apiKey.isEmpty()) {
-        emit error("AI endpoint or API key not configured. Please check Settings.");
+        fail("AI endpoint or API key not configured. Please check Settings.");
         return;
     }
 
@@ -84,11 +93,15 @@ void AIService::sendChatRequest(const QString &systemPrompt, const QString &user
     QByteArray postData = QJsonDocument(requestBody).toJson();
     QNetworkReply *reply = m_networkManager->post(request, postData);
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, onSuccess]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, onSuccess, onFailure]() {
         reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
-            emit error(QString("AI request failed: %1").arg(reply->errorString()));
+            if (onFailure) {
+                onFailure(QString("AI request failed: %1").arg(reply->errorString()));
+            } else {
+                emit error(QString("AI request failed: %1").arg(reply->errorString()));
+            }
             return;
         }
 
@@ -107,7 +120,11 @@ void AIService::sendChatRequest(const QString &systemPrompt, const QString &user
             }
         }
 
-        emit error("Failed to parse AI response.");
+        if (onFailure) {
+            onFailure("Failed to parse AI response.");
+        } else {
+            emit error("Failed to parse AI response.");
+        }
     });
 }
 
@@ -166,6 +183,55 @@ void AIService::summarizeContent(const QString &content)
             emit summaryGenerated(result);
         }
     );
+}
+
+void AIService::summarizeOneLineForExport(
+    const QString &content,
+    std::function<void(const QString &summary)> onSuccess,
+    std::function<void(const QString &errorMessage)> onFailure)
+{
+    QString plainContent = content;
+    plainContent.remove(QRegularExpression("<[^>]*>"));
+    plainContent = plainContent.trimmed();
+
+    if (plainContent.isEmpty()) {
+        if (onSuccess) {
+            onSuccess("📝 (empty)");
+        }
+        return;
+    }
+
+    if (plainContent.length() > 4000) {
+        plainContent = plainContent.left(4000) + "...";
+    }
+
+    sendChatRequest(
+        "Summarize the task in exactly one concise sentence in the same language as the input. "
+        "Return plain text only, no bullets.",
+        plainContent,
+        120, 0.2,
+        [onSuccess](const QString &result) {
+            QString summary = result.simplified();
+            if (summary.startsWith('"') && summary.endsWith('"') && summary.length() > 1) {
+                summary = summary.mid(1, summary.length() - 2);
+            }
+            if (onSuccess) {
+                onSuccess(summary);
+            }
+        },
+        [onFailure](const QString &message) {
+            if (onFailure) {
+                onFailure(message);
+            }
+        }
+    );
+}
+
+bool AIService::isConfigured() const
+{
+    auto &db = DatabaseManager::instance();
+    return !db.getSetting("ai_endpoint").trimmed().isEmpty()
+        && !db.getSetting("ai_api_key").trimmed().isEmpty();
 }
 
 void AIService::verifyConnection(const QString &endpoint, const QString &apiKey, const QString &model)

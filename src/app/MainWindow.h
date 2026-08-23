@@ -3,10 +3,14 @@
 #include <QMainWindow>
 #include <QSystemTrayIcon>
 #include <QSplitter>
+#include <QMap>
+#include <QHash>
 #include "ui/ProductPane.h"
 #include "ui/TaskPane.h"
 #include "ui/EditorPane.h"
 #include "ui/SearchBar.h"
+#include "models/Task.h"
+#include "services/TaskExportService.h"
 
 class UpdateService;
 
@@ -34,6 +38,7 @@ private slots:
     void onSummarizeRequested(int taskId, const QString &content);
     void onSummaryGenerated(const QString &summary);
     void onAIError(const QString &message);
+    void exportTasksToMarkdown();
     void showSettings();
     void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl, const QString &releaseNotes);
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
@@ -46,6 +51,14 @@ private:
     void setupMenuBar();
     void toggleVisibility();
     void checkForUpdates();
+    bool promptExportScopeDialog(bool &exportAllProducts, int &selectedProductId, bool &includeDescription);
+    bool promptTaskSelectionDialog(
+        const QMap<int, QList<Task>> &tasksByProduct,
+        const QHash<int, QString> &productNames,
+        QList<ExportTaskItem> &selectedExportItems);
+    QMap<int, QList<Task>> collectActiveTasksForExport(bool exportAllProducts, int selectedProductId,
+                                                       QHash<int, QString> &productNames) const;
+    void resolveSimpleDescriptions(QList<ExportTaskItem> &items, bool includeDescription, int &fallbackCount) const;
 
     // UI components
     QSplitter *m_splitter;

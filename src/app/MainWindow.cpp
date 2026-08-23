@@ -2,6 +2,7 @@
 #include "ui/SettingsDialog.h"
 #include "services/AIService.h"
 #include "services/UpdateService.h"
+#include "services/TaskExportService.h"
 #include "platform/GlobalHotkey.h"
 #include "db/DatabaseManager.h"
 #include <QCloseEvent>
@@ -9,11 +10,29 @@
 #include <QMenu>
 #include <QAction>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QApplication>
 #include <QDesktopServices>
 #include <QProcess>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QRadioButton>
+#include <QComboBox>
+#include <QCheckBox>
+#include <QTreeWidget>
+#include <QPushButton>
+#include <QLabel>
+#include <QFileDialog>
+#include <QFile>
+#include <QDateTime>
+#include <QStandardPaths>
+#include <QDir>
+#include <QEventLoop>
+#include <QTimer>
+#include <QPointer>
+#include <memory>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -111,6 +130,11 @@ void MainWindow::setupMenuBar()
 
     // File menu
     QMenu *fileMenu = menuBar->addMenu("&File");
+
+    QAction *exportAction = fileMenu->addAction("Export &Tasks to Markdown...");
+    connect(exportAction, &QAction::triggered, this, &MainWindow::exportTasksToMarkdown);
+
+    fileMenu->addSeparator();
 
     QAction *settingsAction = fileMenu->addAction("&Settings...");
     settingsAction->setShortcut(QKeySequence("Ctrl+,"));
@@ -348,6 +372,364 @@ void MainWindow::showSettings()
 {
     SettingsDialog dialog(this);
     dialog.exec();
+}
+
+void MainWindow::exportTasksToMarkdown()
+{
+    bool exportAllProducts = true;
+    int selectedProductId = -1;
+    bool includeDescription = false;
+
+    if (!promptExportScopeDialog(exportAllProducts, selectedProductId, includeDescription)) {
+        return;
+    }
+
+    QHash<int, QString> productNames;
+    QMap<int, QList<Task>> tasksByProduct = collectActiveTasksForExport(
+        exportAllProducts, selectedProductId, productNames);
+
+    if (tasksByProduct.isEmpty()) {
+        QMessageBox::information(this, "Export Tasks",
+                                 "No active tasks found in the selected scope.");
+        return;
+    }
+
+    QList<ExportTaskItem> selectedExportItems;
+    if (!promptTaskSelectionDialog(tasksByProduct, productNames, selectedExportItems)) {
+        return;
+    }
+
+    if (selectedExportItems.isEmpty()) {
+        QMessageBox::information(this, "Export Tasks",
+                                 "Please select at least one task to export.");
+        return;
+    }
+
+    QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (defaultDir.isEmpty()) {
+        defaultDir = QDir::homePath();
+    }
+    QString defaultPath = defaultDir + "/nexus_tasks_" +
+                          QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".md";
+
+    QString path = QFileDialog::getSaveFileName(
+        this,
+        "Export Tasks to Markdown",
+        defaultPath,
+        "Markdown Files (*.md)");
+    if (path.isEmpty()) {
+        return;
+    }
+    if (!path.endsWith(".md", Qt::CaseInsensitive)) {
+        path += ".md";
+    }
+
+    statusBar()->showMessage("Exporting tasks...");
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+
+    int fallbackCount = 0;
+    resolveSimpleDescriptions(selectedExportItems, includeDescription, fallbackCount);
+    const QString markdown = TaskExportService::buildMarkdown(
+        selectedExportItems, QDateTime::currentDateTime());
+
+    QApplication::restoreOverrideCursor();
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(
+            this, "Export Failed",
+            "Failed to write markdown file:\n" + file.errorString());
+        statusBar()->showMessage("Export failed", 5000);
+        return;
+    }
+    file.write(markdown.toUtf8());
+    file.close();
+
+    QString message = QString("Exported %1 task(s) to:\n%2")
+                          .arg(selectedExportItems.size())
+                          .arg(path);
+    if (includeDescription && fallbackCount > 0) {
+        message += QString(
+            "\n\n%1 task description(s) used fallback text because AI was unavailable or failed.")
+                       .arg(fallbackCount);
+    }
+
+    QMessageBox::information(this, "Export Complete", message);
+    statusBar()->showMessage(
+        QString("Export complete: %1 task(s)").arg(selectedExportItems.size()), 6000);
+}
+
+bool MainWindow::promptExportScopeDialog(bool &exportAllProducts,
+                                         int &selectedProductId,
+                                         bool &includeDescription)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Export Tasks - Step 1/2");
+    dialog.setMinimumWidth(520);
+
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *hint = new QLabel(
+        "Status is fixed to Active tasks.\n"
+        "Choose your export scope and description options.",
+        &dialog);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    auto *allProductsRadio = new QRadioButton("All products (Active tasks only)", &dialog);
+    auto *singleProductRadio = new QRadioButton("Single product (Active tasks only)", &dialog);
+    allProductsRadio->setChecked(true);
+    layout->addWidget(allProductsRadio);
+    layout->addWidget(singleProductRadio);
+
+    auto *productCombo = new QComboBox(&dialog);
+    const auto products = DatabaseManager::instance().getAllProducts();
+    for (const Product &product : products) {
+        productCombo->addItem(product.name, product.id);
+    }
+    productCombo->setEnabled(false);
+    connect(singleProductRadio, &QRadioButton::toggled, productCombo, &QWidget::setEnabled);
+    layout->addWidget(productCombo);
+
+    auto *includeDescriptionCheck =
+        new QCheckBox("Include simple description (AI one-line summary)", &dialog);
+    includeDescriptionCheck->setChecked(false);
+    layout->addWidget(includeDescriptionCheck);
+
+    auto *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    exportAllProducts = allProductsRadio->isChecked();
+    selectedProductId = productCombo->currentData().toInt();
+    includeDescription = includeDescriptionCheck->isChecked();
+
+    if (!exportAllProducts && selectedProductId <= 0) {
+        QMessageBox::warning(this, "Export Tasks",
+                             "Please choose a product for export.");
+        return false;
+    }
+
+    return true;
+}
+
+QMap<int, QList<Task>> MainWindow::collectActiveTasksForExport(
+    bool exportAllProducts, int selectedProductId, QHash<int, QString> &productNames) const
+{
+    QMap<int, QList<Task>> tasksByProduct;
+    const auto products = DatabaseManager::instance().getAllProducts();
+
+    for (const Product &product : products) {
+        if (!exportAllProducts && product.id != selectedProductId) {
+            continue;
+        }
+
+        const QList<Task> activeTasks = DatabaseManager::instance().getTasksForProduct(
+            product.id, TaskStatus::Active);
+        if (activeTasks.isEmpty()) {
+            continue;
+        }
+
+        productNames.insert(product.id, product.name);
+        tasksByProduct.insert(product.id, activeTasks);
+    }
+
+    return tasksByProduct;
+}
+
+bool MainWindow::promptTaskSelectionDialog(
+    const QMap<int, QList<Task>> &tasksByProduct,
+    const QHash<int, QString> &productNames,
+    QList<ExportTaskItem> &selectedExportItems)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Export Tasks - Step 2/2");
+    dialog.setMinimumSize(640, 500);
+
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *hint = new QLabel(
+        "Select the main tasks you want to export.\n"
+        "Sub tasks for selected main tasks are included automatically.",
+        &dialog);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    auto *tree = new QTreeWidget(&dialog);
+    tree->setHeaderLabels({"Tasks"});
+    tree->setRootIsDecorated(true);
+    tree->setSelectionMode(QAbstractItemView::NoSelection);
+    layout->addWidget(tree, 1);
+
+    for (auto it = tasksByProduct.cbegin(); it != tasksByProduct.cend(); ++it) {
+        const int productId = it.key();
+        const QString productName = productNames.value(
+            productId, QString("Product %1").arg(productId));
+        auto *productItem = new QTreeWidgetItem(
+            tree, {QString::fromUtf8("📚 ") + productName});
+        productItem->setFlags(productItem->flags() & ~Qt::ItemIsSelectable);
+
+        for (const Task &task : it.value()) {
+            const QString title = task.title.trimmed().isEmpty() ? "Untitled Task" : task.title;
+            auto *taskItem = new QTreeWidgetItem(
+                productItem, {Task::workStatusIcon(task.workStatus) + " " + title});
+            taskItem->setData(0, Qt::UserRole, task.id);
+            taskItem->setData(0, Qt::UserRole + 1, productId);
+            taskItem->setCheckState(0, Qt::Unchecked);
+            taskItem->setFlags(taskItem->flags() | Qt::ItemIsUserCheckable);
+        }
+    }
+    tree->expandAll();
+
+    auto *actionRow = new QHBoxLayout();
+    auto *selectAllBtn = new QPushButton("Select All", &dialog);
+    auto *clearAllBtn = new QPushButton("Clear All", &dialog);
+    actionRow->addWidget(selectAllBtn);
+    actionRow->addWidget(clearAllBtn);
+    actionRow->addStretch();
+    layout->addLayout(actionRow);
+
+    connect(selectAllBtn, &QPushButton::clicked, tree, [tree]() {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            auto *productItem = tree->topLevelItem(i);
+            for (int j = 0; j < productItem->childCount(); ++j) {
+                productItem->child(j)->setCheckState(0, Qt::Checked);
+            }
+        }
+    });
+    connect(clearAllBtn, &QPushButton::clicked, tree, [tree]() {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            auto *productItem = tree->topLevelItem(i);
+            for (int j = 0; j < productItem->childCount(); ++j) {
+                productItem->child(j)->setCheckState(0, Qt::Unchecked);
+            }
+        }
+    });
+
+    auto *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    selectedExportItems.clear();
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        auto *productItem = tree->topLevelItem(i);
+        for (int j = 0; j < productItem->childCount(); ++j) {
+            auto *taskItem = productItem->child(j);
+            if (taskItem->checkState(0) != Qt::Checked) {
+                continue;
+            }
+
+            const int taskId = taskItem->data(0, Qt::UserRole).toInt();
+            const int productId = taskItem->data(0, Qt::UserRole + 1).toInt();
+            const QList<Task> productTasks = tasksByProduct.value(productId);
+            for (const Task &task : productTasks) {
+                if (task.id != taskId) {
+                    continue;
+                }
+
+                ExportTaskItem exportItem;
+                exportItem.productName = productNames.value(productId);
+                exportItem.statusText = "Active";
+                exportItem.title = task.title;
+                exportItem.contentHtml = task.content;
+                exportItem.updatedAt = task.updatedAt;
+
+                const QList<SubTask> subtasks = DatabaseManager::instance().getSubtasks(task.id);
+                for (const SubTask &subtask : subtasks) {
+                    exportItem.subtasks.append({subtask.title, subtask.completed});
+                }
+
+                selectedExportItems.append(exportItem);
+                break;
+            }
+        }
+    }
+
+    return true;
+}
+
+void MainWindow::resolveSimpleDescriptions(QList<ExportTaskItem> &items,
+                                           bool includeDescription,
+                                           int &fallbackCount) const
+{
+    fallbackCount = 0;
+
+    if (!includeDescription) {
+        for (ExportTaskItem &item : items) {
+            item.simpleDescription.clear();
+        }
+        return;
+    }
+
+    if (!AIService::instance().isConfigured()) {
+        for (ExportTaskItem &item : items) {
+            item.simpleDescription = TaskExportService::fallbackSimpleDescription(
+                item.contentHtml, 120);
+            ++fallbackCount;
+        }
+        return;
+    }
+
+    for (ExportTaskItem &item : items) {
+        struct SummaryState {
+            bool done = false;
+            bool success = false;
+            QString summary;
+        };
+
+        auto state = std::make_shared<SummaryState>();
+        QEventLoop loop;
+        QPointer<QEventLoop> loopPtr(&loop);
+        QTimer timeoutTimer;
+        timeoutTimer.setSingleShot(true);
+        connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+        timeoutTimer.start(30000);
+
+        AIService::instance().summarizeOneLineForExport(
+            item.contentHtml,
+            [state, loopPtr](const QString &summaryText) {
+                if (state->done) {
+                    return;
+                }
+                state->done = true;
+                state->summary = summaryText.trimmed();
+                state->success = !state->summary.isEmpty();
+                if (loopPtr) {
+                    loopPtr->quit();
+                }
+            },
+            [state, loopPtr](const QString &) {
+                if (state->done) {
+                    return;
+                }
+                state->done = true;
+                state->success = false;
+                if (loopPtr) {
+                    loopPtr->quit();
+                }
+            });
+
+        loop.exec();
+
+        if (state->done && state->success) {
+            item.simpleDescription = state->summary;
+        } else {
+            item.simpleDescription = TaskExportService::fallbackSimpleDescription(
+                item.contentHtml, 120);
+            ++fallbackCount;
+        }
+    }
 }
 
 void MainWindow::checkForUpdates()
