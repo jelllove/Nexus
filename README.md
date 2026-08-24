@@ -20,7 +20,7 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
 - **Image Support** — Paste or drag images into the editor; stored locally in AppData
 - **Content History** — Automatic snapshots for undo/redo support
-- **Markdown Export** — Export selected Active tasks via a Product → Main Task → Sub Task tree selector, with colorful badge + emoji Markdown output and optional AI-generated one-line descriptions
+- **Markdown Export** — Export selected Active tasks via a mandatory Product → Main Task → Sub Task tree selector (showing a disabled `🫥 (No Sub Task)` node when needed), with colorful badge + emoji Markdown output and optional AI-generated one-line descriptions
 
 ## Architecture
 

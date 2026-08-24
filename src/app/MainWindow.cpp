@@ -551,7 +551,8 @@ bool MainWindow::promptTaskSelectionDialog(
     enum NodeType {
         ProductNode = 1,
         MainTaskNode = 2,
-        SubTaskNode = 3
+        SubTaskNode = 3,
+        EmptySubTaskPlaceholderNode = 4
     };
 
     constexpr int RoleNodeType = Qt::UserRole + 20;
@@ -569,7 +570,7 @@ bool MainWindow::promptTaskSelectionDialog(
     auto *layout = new QVBoxLayout(&dialog);
     auto *hint = new QLabel(
         "Select what to export in a Product → Main Task → Sub Task tree.\n"
-        "You can choose Product/Main/Sub levels directly.",
+        "Main tasks without subtasks show a disabled 🫥 (No Sub Task) placeholder.",
         &dialog);
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -607,20 +608,29 @@ bool MainWindow::promptTaskSelectionDialog(
                                ~Qt::ItemIsSelectable);
 
             const QList<SubTask> subtasks = DatabaseManager::instance().getSubtasks(task.id);
-            for (const SubTask &subtask : subtasks) {
-                const QString subTitle = subtask.title.trimmed().isEmpty()
-                    ? QString("Untitled sub task")
-                    : subtask.title;
-                auto *subtaskItem = new QTreeWidgetItem(
-                    taskItem,
-                    {QString("%1 %2").arg(subtask.completed ? "✅" : "⬜", subTitle)});
-                subtaskItem->setData(0, RoleNodeType, SubTaskNode);
-                subtaskItem->setData(0, RoleId, subtask.id);
-                subtaskItem->setData(0, RoleTitle, subtask.title);
-                subtaskItem->setData(0, RoleSubtaskCompleted, subtask.completed);
-                subtaskItem->setCheckState(0, Qt::Unchecked);
-                subtaskItem->setFlags((subtaskItem->flags() | Qt::ItemIsUserCheckable) &
+            if (subtasks.isEmpty()) {
+                auto *placeholder = new QTreeWidgetItem(
+                    taskItem, {QString::fromUtf8("🫥 (No Sub Task)")});
+                placeholder->setFlags((placeholder->flags() & ~Qt::ItemIsUserCheckable) &
                                       ~Qt::ItemIsSelectable);
+                placeholder->setData(0, RoleNodeType, EmptySubTaskPlaceholderNode);
+                placeholder->setDisabled(true);
+            } else {
+                for (const SubTask &subtask : subtasks) {
+                    const QString subTitle = subtask.title.trimmed().isEmpty()
+                        ? QString("Untitled sub task")
+                        : subtask.title;
+                    auto *subtaskItem = new QTreeWidgetItem(
+                        taskItem,
+                        {QString("%1 %2").arg(subtask.completed ? "✅" : "⬜", subTitle)});
+                    subtaskItem->setData(0, RoleNodeType, SubTaskNode);
+                    subtaskItem->setData(0, RoleId, subtask.id);
+                    subtaskItem->setData(0, RoleTitle, subtask.title);
+                    subtaskItem->setData(0, RoleSubtaskCompleted, subtask.completed);
+                    subtaskItem->setCheckState(0, Qt::Unchecked);
+                    subtaskItem->setFlags((subtaskItem->flags() | Qt::ItemIsUserCheckable) &
+                                          ~Qt::ItemIsSelectable);
+                }
             }
         }
     }
@@ -639,7 +649,10 @@ bool MainWindow::promptTaskSelectionDialog(
                 const Qt::CheckState state = item->checkState(0);
                 if (state != Qt::PartiallyChecked) {
                     for (int i = 0; i < item->childCount(); ++i) {
-                        item->child(i)->setCheckState(0, state);
+                        QTreeWidgetItem *child = item->child(i);
+                        if (!child->isDisabled()) {
+                            child->setCheckState(0, state);
+                        }
                     }
                 }
 

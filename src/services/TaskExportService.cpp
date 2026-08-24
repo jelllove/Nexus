@@ -146,6 +146,7 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
         const QString productName = normalizeHeading(item.productName, "📁 Unknown Product");
         const QString taskTitle = normalizeHeading(item.title, "📝 Untitled Task");
         const QString status = item.statusText.trimmed().isEmpty() ? "Active" : item.statusText.trimmed();
+        const QString statusWithEmoji = statusEmoji(status) + " " + status;
         const QString workStatusText = item.workStatusText.trimmed().isEmpty()
             ? QString("Not Started")
             : item.workStatusText.trimmed();
@@ -162,14 +163,14 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
             stream << makeBadge("Product", currentProduct, "6366f1") << "\n\n";
         }
 
-        stream << "### " << statusEmoji(status) << " " << taskTitle << "\n\n";
-        stream << makeBadge("Task Status", status, statusColor(status)) << " "
+        stream << "### " << workStatusIcon << " " << taskTitle << "\n\n";
+        stream << makeBadge("Task Status", statusWithEmoji, statusColor(status)) << " "
                << makeBadge("Work", workStatusText, workStatusColor(workStatusText)) << " "
                << makeBadge("Subs", QString("%1/%2 done").arg(doneSubs).arg(totalSubs), subBadgeColor)
                << "\n\n";
         stream << "| Field | Value |\n";
         stream << "|---|---|\n";
-        stream << "| Status | " << escapeTableCell(status) << " |\n";
+        stream << "| Status | " << escapeTableCell(statusWithEmoji) << " |\n";
         stream << "| Title | " << escapeTableCell(taskTitle) << " |\n";
         stream << "| Work | " << escapeTableCell(workStatusIcon + " " + workStatusText) << " |\n";
         stream << "| Updated | " << escapeTableCell(item.updatedAt.isValid() ? item.updatedAt.toString("yyyy-MM-dd HH:mm") : "N/A") << " |\n\n";
@@ -189,7 +190,7 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
         }
 
         if (item.subtasks.isEmpty()) {
-            stream << "- 💤 No sub tasks selected\n\n";
+            stream << "- 💤 No sub tasks\n\n";
         } else {
             stream << "#### 🪜 Selected Sub Tasks\n\n";
             for (const ExportSubTaskItem &subtask : item.subtasks) {
