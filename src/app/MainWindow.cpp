@@ -5,6 +5,7 @@
 #include "services/TaskExportService.h"
 #include "platform/GlobalHotkey.h"
 #include "db/DatabaseManager.h"
+#include "ui/ExportProgressDialog.h"
 #include <QCloseEvent>
 #include <QMenuBar>
 #include <QMenu>
@@ -405,6 +406,18 @@ void MainWindow::exportTasksToMarkdown()
         return;
     }
 
+    if (includeDescription) {
+        const auto confirm = QMessageBox::question(
+            this,
+            "Confirm AI Summarization",
+            "AI summarization is enabled. Nexus will call your configured AI endpoint "
+            "to generate one-line summaries for selected tasks.\n\nContinue?",
+            QMessageBox::Yes | QMessageBox::No);
+        if (confirm != QMessageBox::Yes) {
+            return;
+        }
+    }
+
     QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     if (defaultDir.isEmpty()) {
         defaultDir = QDir::homePath();
@@ -424,18 +437,71 @@ void MainWindow::exportTasksToMarkdown()
         path += ".md";
     }
 
-    statusBar()->showMessage("Exporting tasks...");
-    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const int summaryUnits = includeDescription ? selectedExportItems.size() : 0;
+    const int totalUnits = qMax(2, summaryUnits + 2);
+    int completedUnits = 0;
 
+    ExportProgressDialog progressDialog(this);
+    progressDialog.setProgress(0, totalUnits);
+    progressDialog.appendLog("Export started.");
+    progressDialog.show();
+
+    auto setProgress = [&](int completed, const QString &message) {
+        completedUnits = qBound(0, completed, totalUnits);
+        progressDialog.setProgress(completedUnits, totalUnits);
+        if (!message.trimmed().isEmpty()) {
+            progressDialog.appendLog(message);
+        }
+    };
+
+    if (progressDialog.isCancelled()) {
+        statusBar()->showMessage("Export cancelled", 5000);
+        return;
+    }
+
+    statusBar()->showMessage("Exporting tasks...");
     int fallbackCount = 0;
-    resolveSimpleDescriptions(selectedExportItems, includeDescription, fallbackCount);
+    const bool summariesDone = resolveSimpleDescriptions(
+        selectedExportItems, includeDescription, fallbackCount,
+        [&](int completed, int total, const QString &message) {
+            Q_UNUSED(total);
+            setProgress(completed, message);
+        },
+        [&]() {
+            return progressDialog.isCancelled();
+        });
+
+    if (!summariesDone) {
+        progressDialog.appendLog("Export cancelled before markdown generation.");
+        statusBar()->showMessage("Export cancelled", 5000);
+        return;
+    }
+
+    if (!includeDescription) {
+        setProgress(0, "AI summarization disabled. Skipping summary stage.");
+    }
+
+    if (progressDialog.isCancelled()) {
+        progressDialog.appendLog("Export cancelled before markdown build.");
+        statusBar()->showMessage("Export cancelled", 5000);
+        return;
+    }
+
+    setProgress(summaryUnits + 1, "Building markdown content.");
     const QString markdown = TaskExportService::buildMarkdown(
         selectedExportItems, QDateTime::currentDateTime());
 
-    QApplication::restoreOverrideCursor();
+    if (progressDialog.isCancelled()) {
+        progressDialog.appendLog("Export cancelled before writing file.");
+        statusBar()->showMessage("Export cancelled", 5000);
+        return;
+    }
+
+    setProgress(summaryUnits + 2, "Writing markdown file.");
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        progressDialog.appendLog("Failed to open output file for writing.");
         QMessageBox::warning(
             this, "Export Failed",
             "Failed to write markdown file:\n" + file.errorString());
@@ -444,6 +510,8 @@ void MainWindow::exportTasksToMarkdown()
     }
     file.write(markdown.toUtf8());
     file.close();
+    progressDialog.appendLog("Export completed successfully.");
+    progressDialog.close();
 
     QString message = QString("Exported %1 task(s) to:\n%2")
                           .arg(selectedExportItems.size())
@@ -771,29 +839,48 @@ bool MainWindow::promptTaskSelectionDialog(
     return true;
 }
 
-void MainWindow::resolveSimpleDescriptions(QList<ExportTaskItem> &items,
-                                           bool includeDescription,
-                                           int &fallbackCount) const
+bool MainWindow::resolveSimpleDescriptions(
+    QList<ExportTaskItem> &items,
+    bool includeDescription,
+    int &fallbackCount,
+    const std::function<void(int completed, int total, const QString &message)> &progressCallback,
+    const std::function<bool()> &isCancelled) const
 {
     fallbackCount = 0;
+    const int total = items.size();
 
     if (!includeDescription) {
         for (ExportTaskItem &item : items) {
             item.simpleDescription.clear();
         }
-        return;
+        return true;
     }
 
     if (!AIService::instance().isConfigured()) {
-        for (ExportTaskItem &item : items) {
+        for (int i = 0; i < items.size(); ++i) {
+            if (isCancelled && isCancelled()) {
+                return false;
+            }
+            ExportTaskItem &item = items[i];
             item.simpleDescription = TaskExportService::fallbackSimpleDescription(
                 item.contentHtml, 120);
             ++fallbackCount;
+            if (progressCallback) {
+                progressCallback(i + 1, total,
+                                 QString("AI unavailable, used fallback summary (%1/%2).")
+                                     .arg(i + 1)
+                                     .arg(total));
+            }
         }
-        return;
+        return true;
     }
 
-    for (ExportTaskItem &item : items) {
+    for (int i = 0; i < items.size(); ++i) {
+        if (isCancelled && isCancelled()) {
+            return false;
+        }
+
+        ExportTaskItem &item = items[i];
         struct SummaryState {
             bool done = false;
             bool success = false;
@@ -836,12 +923,30 @@ void MainWindow::resolveSimpleDescriptions(QList<ExportTaskItem> &items,
 
         if (state->done && state->success) {
             item.simpleDescription = state->summary;
+            if (progressCallback) {
+                progressCallback(i + 1, total,
+                                 QString("Generated AI summary (%1/%2).")
+                                     .arg(i + 1)
+                                     .arg(total));
+            }
         } else {
             item.simpleDescription = TaskExportService::fallbackSimpleDescription(
                 item.contentHtml, 120);
             ++fallbackCount;
+            if (progressCallback) {
+                progressCallback(i + 1, total,
+                                 QString("AI summary failed, used fallback (%1/%2).")
+                                     .arg(i + 1)
+                                     .arg(total));
+            }
+        }
+
+        if (isCancelled && isCancelled()) {
+            return false;
         }
     }
+
+    return true;
 }
 
 void MainWindow::checkForUpdates()

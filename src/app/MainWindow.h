@@ -5,6 +5,7 @@
 #include <QSplitter>
 #include <QMap>
 #include <QHash>
+#include <functional>
 #include "ui/ProductPane.h"
 #include "ui/TaskPane.h"
 #include "ui/EditorPane.h"
@@ -58,7 +59,12 @@ private:
         QList<ExportTaskItem> &selectedExportItems);
     QMap<int, QList<Task>> collectActiveTasksForExport(bool exportAllProducts, int selectedProductId,
                                                        QHash<int, QString> &productNames) const;
-    void resolveSimpleDescriptions(QList<ExportTaskItem> &items, bool includeDescription, int &fallbackCount) const;
+    bool resolveSimpleDescriptions(
+        QList<ExportTaskItem> &items,
+        bool includeDescription,
+        int &fallbackCount,
+        const std::function<void(int completed, int total, const QString &message)> &progressCallback,
+        const std::function<bool()> &isCancelled) const;
 
     // UI components
     QSplitter *m_splitter;
