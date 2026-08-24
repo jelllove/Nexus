@@ -35,9 +35,11 @@ QVariant ProductListModel::data(const QModelIndex &index, int role) const
 
 Qt::ItemFlags ProductListModel::flags(const QModelIndex &index) const
 {
-    if (!index.isValid())
-        return Qt::NoItemFlags;
-    return Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsEditable;
+    Qt::ItemFlags baseFlags = QAbstractListModel::flags(index);
+    if (!index.isValid()) {
+        return baseFlags | Qt::ItemIsDropEnabled;
+    }
+    return baseFlags | Qt::ItemIsEditable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled;
 }
 
 bool ProductListModel::setData(const QModelIndex &index, const QVariant &value, int role)
@@ -58,11 +60,55 @@ bool ProductListModel::setData(const QModelIndex &index, const QVariant &value, 
     return false;
 }
 
-void ProductListModel::loadProducts()
+Qt::DropActions ProductListModel::supportedDropActions() const
 {
+    return Qt::MoveAction;
+}
+
+bool ProductListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int count,
+                                const QModelIndex &destinationParent, int destinationRow)
+{
+    Q_UNUSED(sourceParent);
+    Q_UNUSED(destinationParent);
+
+    if (count != 1) return false;
+    if (sourceRow < 0 || sourceRow >= m_products.size()) return false;
+    if (destinationRow < 0 || destinationRow > m_products.size()) return false;
+    if (destinationRow == sourceRow || destinationRow == sourceRow + 1) return false;
+
+    const int targetRow = destinationRow > sourceRow ? destinationRow - 1 : destinationRow;
+    beginMoveRows(QModelIndex(), sourceRow, sourceRow, QModelIndex(), destinationRow);
+    m_products.move(sourceRow, targetRow);
+    endMoveRows();
+
+    QList<int> productIds;
+    productIds.reserve(m_products.size());
+    for (const Product &p : m_products) {
+        productIds.append(p.id);
+    }
+
+    if (!DatabaseManager::instance().reorderProductsByStatus(productIds, m_status)) {
+        loadProducts(m_status);
+        return false;
+    }
+
+    return true;
+}
+
+void ProductListModel::loadProducts(ProductStatus status)
+{
+    m_status = status;
     beginResetModel();
-    m_products = DatabaseManager::instance().getAllProducts();
+    m_products = DatabaseManager::instance().getProductsByStatus(status);
     endResetModel();
+}
+
+void ProductListModel::setStatus(ProductStatus status)
+{
+    if (m_status == status) {
+        return;
+    }
+    loadProducts(status);
 }
 
 int ProductListModel::productIdAt(int row) const
