@@ -21,7 +21,6 @@ signals:
     void productSelected(int productId);
 
 private slots:
-    void onProductClicked(const QModelIndex &index);
     void onAddProduct();
     void onDeleteProduct();
     void onRenameProduct();
@@ -29,9 +28,17 @@ private slots:
 private:
     void setupUi();
     void setupContextMenu();
+    void onProductClicked(QListView *sourceView, ProductListModel *sourceModel, const QModelIndex &index);
+    ProductListModel *modelForView(QListView *view) const;
+    void setCurrentListView(QListView *view);
 
-    QListView *m_listView;
-    ProductListModel *m_model;
+    QListView *m_activeListView;
+    QListView *m_archivedListView;
+    ProductListModel *m_activeModel;
+    ProductListModel *m_archivedModel;
+    QListView *m_currentListView = nullptr;
+    QWidget *m_archivedSection;
+    QPushButton *m_showArchivedButton;
     QPushButton *m_addButton;
     QLabel *m_titleLabel;
 };
