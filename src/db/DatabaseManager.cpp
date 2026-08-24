@@ -9,6 +9,22 @@
 #include <QDateTime>
 #include <QVariant>
 
+namespace {
+
+QString productStatusToDb(ProductStatus status)
+{
+    return status == ProductStatus::Archived ? "archived" : "active";
+}
+
+ProductStatus productStatusFromDb(const QString &value)
+{
+    return value.trimmed().toLower() == "archived"
+        ? ProductStatus::Archived
+        : ProductStatus::Active;
+}
+
+} // namespace
+
 DatabaseManager& DatabaseManager::instance()
 {
     static DatabaseManager inst;
@@ -58,6 +74,8 @@ bool DatabaseManager::createTables()
         "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  name TEXT NOT NULL,"
         "  sort_order INTEGER DEFAULT 0,"
+        "  status TEXT DEFAULT 'active',"
+        "  archived_at DATETIME,"
         "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
         "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"
         ")")) {
@@ -262,6 +280,44 @@ bool DatabaseManager::migrateDatabase()
         dbVersion = 6;
     }
 
+    // Migration v6 -> v7: add product status archive fields
+    if (dbVersion < 7) {
+        query.exec("PRAGMA table_info(products)");
+        bool hasStatus = false;
+        bool hasArchivedAt = false;
+        while (query.next()) {
+            const QString col = query.value(1).toString();
+            if (col == "status") {
+                hasStatus = true;
+            } else if (col == "archived_at") {
+                hasArchivedAt = true;
+            }
+        }
+
+        if (!hasStatus) {
+            if (!query.exec("ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'active'")) {
+                qWarning() << "Failed to add products.status column:" << query.lastError().text();
+                return false;
+            }
+        }
+
+        if (!hasArchivedAt) {
+            if (!query.exec("ALTER TABLE products ADD COLUMN archived_at DATETIME")) {
+                qWarning() << "Failed to add products.archived_at column:" << query.lastError().text();
+                return false;
+            }
+        }
+
+        if (!query.exec("UPDATE products SET status = 'active' WHERE status IS NULL OR status = ''")) {
+            qWarning() << "Failed to backfill products.status:" << query.lastError().text();
+            return false;
+        }
+
+        qInfo() << "Migration v7: added status/archived_at to products table";
+        setSetting("db_version", "7");
+        dbVersion = 7;
+    }
+
     return true;
 }
 
@@ -269,17 +325,31 @@ bool DatabaseManager::migrateDatabase()
 
 QList<Product> DatabaseManager::getAllProducts()
 {
+    return getProductsByStatus(ProductStatus::Active);
+}
+
+QList<Product> DatabaseManager::getProductsByStatus(ProductStatus status)
+{
     QList<Product> products;
     QSqlQuery query(m_db);
-    query.exec("SELECT id, name, sort_order, created_at, updated_at FROM products ORDER BY sort_order, id");
+    query.prepare(
+        "SELECT id, name, sort_order, status, archived_at, created_at, updated_at "
+        "FROM products WHERE status = ? ORDER BY sort_order, id");
+    query.addBindValue(productStatusToDb(status));
+    if (!query.exec()) {
+        qWarning() << "Failed to query products by status:" << query.lastError().text();
+        return products;
+    }
 
     while (query.next()) {
         Product p;
         p.id = query.value(0).toInt();
         p.name = query.value(1).toString();
         p.sortOrder = query.value(2).toInt();
-        p.createdAt = query.value(3).toDateTime();
-        p.updatedAt = query.value(4).toDateTime();
+        p.status = productStatusFromDb(query.value(3).toString());
+        p.archivedAt = query.value(4).toDateTime();
+        p.createdAt = query.value(5).toDateTime();
+        p.updatedAt = query.value(6).toDateTime();
         products.append(p);
     }
     return products;
@@ -289,14 +359,18 @@ Product DatabaseManager::getProduct(int id)
 {
     Product p;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, name, sort_order, created_at, updated_at FROM products WHERE id = ?");
+    query.prepare(
+        "SELECT id, name, sort_order, status, archived_at, created_at, updated_at "
+        "FROM products WHERE id = ?");
     query.addBindValue(id);
     if (query.exec() && query.next()) {
         p.id = query.value(0).toInt();
         p.name = query.value(1).toString();
         p.sortOrder = query.value(2).toInt();
-        p.createdAt = query.value(3).toDateTime();
-        p.updatedAt = query.value(4).toDateTime();
+        p.status = productStatusFromDb(query.value(3).toString());
+        p.archivedAt = query.value(4).toDateTime();
+        p.createdAt = query.value(5).toDateTime();
+        p.updatedAt = query.value(6).toDateTime();
     }
     return p;
 }
@@ -342,18 +416,56 @@ bool DatabaseManager::deleteProduct(int id)
 
 bool DatabaseManager::reorderProducts(const QList<int> &productIds)
 {
+    return reorderProductsByStatus(productIds, ProductStatus::Active);
+}
+
+bool DatabaseManager::reorderProductsByStatus(const QList<int> &productIds, ProductStatus status)
+{
     QSqlQuery query(m_db);
-    m_db.transaction();
+    if (!m_db.transaction()) {
+        qWarning() << "Failed to start transaction for reorderProductsByStatus";
+        return false;
+    }
     for (int i = 0; i < productIds.size(); ++i) {
-        query.prepare("UPDATE products SET sort_order = ? WHERE id = ?");
+        query.prepare("UPDATE products SET sort_order = ?, updated_at = CURRENT_TIMESTAMP "
+                      "WHERE id = ? AND status = ?");
         query.addBindValue(i);
         query.addBindValue(productIds[i]);
+        query.addBindValue(productStatusToDb(status));
         if (!query.exec()) {
             m_db.rollback();
             return false;
         }
     }
     return m_db.commit();
+}
+
+bool DatabaseManager::archiveProduct(int id)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE products SET status = 'archived', archived_at = CURRENT_TIMESTAMP, "
+                  "updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(id);
+    if (query.exec()) {
+        emit productUpdated(id);
+        return true;
+    }
+    qWarning() << "Failed to archive product:" << query.lastError().text();
+    return false;
+}
+
+bool DatabaseManager::reactivateProduct(int id)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE products SET status = 'active', archived_at = NULL, "
+                  "updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(id);
+    if (query.exec()) {
+        emit productUpdated(id);
+        return true;
+    }
+    qWarning() << "Failed to reactivate product:" << query.lastError().text();
+    return false;
 }
 
 // --- Task CRUD ---

@@ -23,11 +23,15 @@ public:
 
     // Product CRUD
     QList<Product> getAllProducts();
+    QList<Product> getProductsByStatus(ProductStatus status);
     Product getProduct(int id);
     int addProduct(const QString &name);
     bool updateProduct(int id, const QString &name);
     bool deleteProduct(int id);
     bool reorderProducts(const QList<int> &productIds);
+    bool reorderProductsByStatus(const QList<int> &productIds, ProductStatus status);
+    bool archiveProduct(int id);
+    bool reactivateProduct(int id);
 
     // Task CRUD
     QList<Task> getTasksForProduct(int productId, TaskStatus status = TaskStatus::Active);
