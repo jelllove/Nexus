@@ -15,12 +15,13 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **Full-Text Search** — SQLite FTS5-powered instant search across all task titles and content, with LIKE fallback
 - **Priority Management** — Click the priority badge or right-click to change task priority; tasks auto-sort by priority then due date
 - **Active / Archived Toggle** — Quick-switch between active and archived tasks with toggle buttons
+- **Product Ordering & Archive** — Drag to reorder products, archive/reactivate products, and expand archived products below the active list
 - **System Tray** — Minimize to tray; restore with a click
 - **Global Hotkey** — Win32 `RegisterHotKey` to summon the window from anywhere
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
 - **Image Support** — Paste or drag images into the editor; stored locally in AppData
 - **Content History** — Automatic snapshots for undo/redo support
-- **Markdown Export** — Export selected Active tasks via a mandatory Product → Main Task → Sub Task tree selector (showing a disabled `🫥 (No Sub Task)` node when needed), with colorful badge + emoji Markdown output and optional AI-generated one-line descriptions
+- **Markdown Export** — Export selected Active tasks via Product → Main Task → Sub Task selection, optional AI one-line summaries with extra confirmation, progress dialog with logs/cancel, and collapsible tree-style Markdown output without color badges
 
 ## Architecture
 
