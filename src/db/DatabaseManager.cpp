@@ -23,6 +23,29 @@ ProductStatus productStatusFromDb(const QString &value)
         : ProductStatus::Active;
 }
 
+bool queryProductStatusColumns(QSqlDatabase &db, bool &hasStatus, bool &hasArchivedAt)
+{
+    hasStatus = false;
+    hasArchivedAt = false;
+
+    QSqlQuery query(db);
+    if (!query.exec("PRAGMA table_info(products)")) {
+        qWarning() << "Failed to inspect products columns:" << query.lastError().text();
+        return false;
+    }
+
+    while (query.next()) {
+        const QString col = query.value(1).toString();
+        if (col == "status") {
+            hasStatus = true;
+        } else if (col == "archived_at") {
+            hasArchivedAt = true;
+        }
+    }
+
+    return true;
+}
+
 } // namespace
 
 DatabaseManager& DatabaseManager::instance()
@@ -60,7 +83,10 @@ bool DatabaseManager::initialize(const QString &dbPath)
     if (!createTables() || !createFtsTables())
         return false;
 
-    migrateDatabase();
+    if (!migrateDatabase()) {
+        qCritical() << "Database migration failed.";
+        return false;
+    }
     return true;
 }
 
@@ -280,25 +306,21 @@ bool DatabaseManager::migrateDatabase()
         dbVersion = 6;
     }
 
-    // Migration v6 -> v7: add product status archive fields
-    if (dbVersion < 7) {
-        query.exec("PRAGMA table_info(products)");
+    // Migration v7 compatibility: ensure products.status / products.archived_at exist
+    {
         bool hasStatus = false;
         bool hasArchivedAt = false;
-        while (query.next()) {
-            const QString col = query.value(1).toString();
-            if (col == "status") {
-                hasStatus = true;
-            } else if (col == "archived_at") {
-                hasArchivedAt = true;
-            }
+        if (!queryProductStatusColumns(m_db, hasStatus, hasArchivedAt)) {
+            return false;
         }
 
+        bool migrated = false;
         if (!hasStatus) {
             if (!query.exec("ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'active'")) {
                 qWarning() << "Failed to add products.status column:" << query.lastError().text();
                 return false;
             }
+            migrated = true;
         }
 
         if (!hasArchivedAt) {
@@ -306,16 +328,19 @@ bool DatabaseManager::migrateDatabase()
                 qWarning() << "Failed to add products.archived_at column:" << query.lastError().text();
                 return false;
             }
+            migrated = true;
         }
 
-        if (!query.exec("UPDATE products SET status = 'active' WHERE status IS NULL OR status = ''")) {
+        if (!query.exec("UPDATE products SET status = 'active' WHERE status IS NULL OR TRIM(status) = ''")) {
             qWarning() << "Failed to backfill products.status:" << query.lastError().text();
             return false;
         }
 
-        qInfo() << "Migration v7: added status/archived_at to products table";
-        setSetting("db_version", "7");
-        dbVersion = 7;
+        if (dbVersion < 7 || migrated) {
+            qInfo() << "Migration v7: ensured status/archived_at on products table";
+            setSetting("db_version", "7");
+            dbVersion = 7;
+        }
     }
 
     return true;
@@ -331,11 +356,48 @@ QList<Product> DatabaseManager::getAllProducts()
 QList<Product> DatabaseManager::getProductsByStatus(ProductStatus status)
 {
     QList<Product> products;
+    bool hasStatus = false;
+    bool hasArchivedAt = false;
+    if (!queryProductStatusColumns(m_db, hasStatus, hasArchivedAt)) {
+        return products;
+    }
+
     QSqlQuery query(m_db);
-    query.prepare(
-        "SELECT id, name, sort_order, status, archived_at, created_at, updated_at "
-        "FROM products WHERE status = ? ORDER BY sort_order, id");
-    query.addBindValue(productStatusToDb(status));
+
+    if (!hasStatus) {
+        if (status == ProductStatus::Archived) {
+            return products;
+        }
+
+        if (!query.exec("SELECT id, name, sort_order, created_at, updated_at "
+                        "FROM products ORDER BY sort_order, id")) {
+            qWarning() << "Failed to query legacy products:" << query.lastError().text();
+            return products;
+        }
+
+        while (query.next()) {
+            Product p;
+            p.id = query.value(0).toInt();
+            p.name = query.value(1).toString();
+            p.sortOrder = query.value(2).toInt();
+            p.status = ProductStatus::Active;
+            p.createdAt = query.value(3).toDateTime();
+            p.updatedAt = query.value(4).toDateTime();
+            products.append(p);
+        }
+        return products;
+    }
+
+    const QString archivedExpr = hasArchivedAt ? "archived_at" : "NULL";
+    const QString statusFilter = (status == ProductStatus::Archived)
+        ? "LOWER(TRIM(COALESCE(status, ''))) = 'archived'"
+        : "LOWER(TRIM(COALESCE(status, ''))) <> 'archived'";
+    query.prepare(QString(
+        "SELECT id, name, sort_order, COALESCE(NULLIF(status, ''), 'active') AS normalized_status, "
+        "%1 AS archived_at, created_at, updated_at "
+        "FROM products "
+        "WHERE %2 "
+        "ORDER BY sort_order, id").arg(archivedExpr, statusFilter));
     if (!query.exec()) {
         qWarning() << "Failed to query products by status:" << query.lastError().text();
         return products;
@@ -358,10 +420,32 @@ QList<Product> DatabaseManager::getProductsByStatus(ProductStatus status)
 Product DatabaseManager::getProduct(int id)
 {
     Product p;
+    bool hasStatus = false;
+    bool hasArchivedAt = false;
+    if (!queryProductStatusColumns(m_db, hasStatus, hasArchivedAt)) {
+        return p;
+    }
+
     QSqlQuery query(m_db);
-    query.prepare(
-        "SELECT id, name, sort_order, status, archived_at, created_at, updated_at "
-        "FROM products WHERE id = ?");
+    if (!hasStatus) {
+        query.prepare("SELECT id, name, sort_order, created_at, updated_at FROM products WHERE id = ?");
+        query.addBindValue(id);
+        if (query.exec() && query.next()) {
+            p.id = query.value(0).toInt();
+            p.name = query.value(1).toString();
+            p.sortOrder = query.value(2).toInt();
+            p.status = ProductStatus::Active;
+            p.createdAt = query.value(3).toDateTime();
+            p.updatedAt = query.value(4).toDateTime();
+        }
+        return p;
+    }
+
+    const QString archivedExpr = hasArchivedAt ? "archived_at" : "NULL";
+    query.prepare(QString(
+        "SELECT id, name, sort_order, COALESCE(NULLIF(status, ''), 'active') AS normalized_status, "
+        "%1 AS archived_at, created_at, updated_at "
+        "FROM products WHERE id = ?").arg(archivedExpr));
     query.addBindValue(id);
     if (query.exec() && query.next()) {
         p.id = query.value(0).toInt();
@@ -421,17 +505,45 @@ bool DatabaseManager::reorderProducts(const QList<int> &productIds)
 
 bool DatabaseManager::reorderProductsByStatus(const QList<int> &productIds, ProductStatus status)
 {
+    bool hasStatus = false;
+    bool hasArchivedAt = false;
+    if (!queryProductStatusColumns(m_db, hasStatus, hasArchivedAt)) {
+        return false;
+    }
+
     QSqlQuery query(m_db);
     if (!m_db.transaction()) {
         qWarning() << "Failed to start transaction for reorderProductsByStatus";
         return false;
     }
+
+    if (!hasStatus) {
+        if (status == ProductStatus::Archived) {
+            return m_db.commit();
+        }
+
+        for (int i = 0; i < productIds.size(); ++i) {
+            query.prepare("UPDATE products SET sort_order = ?, updated_at = CURRENT_TIMESTAMP "
+                          "WHERE id = ?");
+            query.addBindValue(i);
+            query.addBindValue(productIds[i]);
+            if (!query.exec()) {
+                m_db.rollback();
+                return false;
+            }
+        }
+        return m_db.commit();
+    }
+
+    const QString statusFilter = (status == ProductStatus::Archived)
+        ? "LOWER(TRIM(COALESCE(status, ''))) = 'archived'"
+        : "LOWER(TRIM(COALESCE(status, ''))) <> 'archived'";
+
     for (int i = 0; i < productIds.size(); ++i) {
-        query.prepare("UPDATE products SET sort_order = ?, updated_at = CURRENT_TIMESTAMP "
-                      "WHERE id = ? AND status = ?");
+        query.prepare(QString("UPDATE products SET sort_order = ?, updated_at = CURRENT_TIMESTAMP "
+                              "WHERE id = ? AND %1").arg(statusFilter));
         query.addBindValue(i);
         query.addBindValue(productIds[i]);
-        query.addBindValue(productStatusToDb(status));
         if (!query.exec()) {
             m_db.rollback();
             return false;
@@ -442,9 +554,18 @@ bool DatabaseManager::reorderProductsByStatus(const QList<int> &productIds, Prod
 
 bool DatabaseManager::archiveProduct(int id)
 {
+    bool hasStatus = false;
+    bool hasArchivedAt = false;
+    if (!queryProductStatusColumns(m_db, hasStatus, hasArchivedAt) || !hasStatus) {
+        qWarning() << "Cannot archive product because products.status is unavailable.";
+        return false;
+    }
+    Q_UNUSED(hasArchivedAt);
+
     QSqlQuery query(m_db);
-    query.prepare("UPDATE products SET status = 'archived', archived_at = CURRENT_TIMESTAMP, "
-                  "updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.prepare("UPDATE products SET status = 'archived', "
+                  "archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                  "WHERE id = ?");
     query.addBindValue(id);
     if (query.exec()) {
         emit productUpdated(id);
@@ -456,6 +577,14 @@ bool DatabaseManager::archiveProduct(int id)
 
 bool DatabaseManager::reactivateProduct(int id)
 {
+    bool hasStatus = false;
+    bool hasArchivedAt = false;
+    if (!queryProductStatusColumns(m_db, hasStatus, hasArchivedAt) || !hasStatus) {
+        qWarning() << "Cannot reactivate product because products.status is unavailable.";
+        return false;
+    }
+    Q_UNUSED(hasArchivedAt);
+
     QSqlQuery query(m_db);
     query.prepare("UPDATE products SET status = 'active', archived_at = NULL, "
                   "updated_at = CURRENT_TIMESTAMP WHERE id = ?");

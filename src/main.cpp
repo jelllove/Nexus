@@ -4,6 +4,7 @@
 #include <QSettings>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QMessageBox>
 #include <QtWebEngineWidgets/QWebEngineView>
 #include "app/MainWindow.h"
 #include "db/DatabaseManager.h"
@@ -41,7 +42,16 @@ int main(int argc, char *argv[])
     // Initialize database (use custom path from QSettings if set)
     QSettings settings;
     QString dbPath = settings.value("db_path").toString();
-    DatabaseManager::instance().initialize(dbPath.isEmpty() ? QString() : dbPath);
+    bool dbReady = DatabaseManager::instance().initialize(dbPath.isEmpty() ? QString() : dbPath);
+    if (!dbReady && !dbPath.isEmpty()) {
+        // Recover from stale custom path on another machine by retrying default location.
+        dbReady = DatabaseManager::instance().initialize();
+    }
+    if (!dbReady) {
+        QMessageBox::critical(nullptr, "Nexus",
+                              "Failed to initialize database. Please check database path/settings.");
+        return 1;
+    }
 
     // Daily automatic backup
     DatabaseManager::instance().backupDatabase();
