@@ -67,6 +67,9 @@ int main(int argc, char *argv[])
     // Purge tasks deleted more than 30 days ago
     DatabaseManager::instance().purgeOldDeletedTasks(30);
 
+    // Weekly compaction in delayed background run
+    DatabaseManager::instance().scheduleWeeklyCompaction(7, 60 * 1000);
+
     // Create and show main window
     MainWindow mainWindow;
     mainWindow.show();

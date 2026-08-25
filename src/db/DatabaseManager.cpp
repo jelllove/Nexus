@@ -8,6 +8,9 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QVariant>
+#include <QTimer>
+#include <QUuid>
+#include <QtConcurrent>
 
 namespace {
 
@@ -44,6 +47,42 @@ bool queryProductStatusColumns(QSqlDatabase &db, bool &hasStatus, bool &hasArchi
     }
 
     return true;
+}
+
+struct CompactionResult {
+    bool success = false;
+    qint64 beforeBytes = 0;
+    qint64 afterBytes = 0;
+    QString error;
+};
+
+CompactionResult compactDatabaseFile(const QString &dbPath)
+{
+    CompactionResult result;
+    result.beforeBytes = QFileInfo(dbPath).size();
+
+    const QString connName = "nexus_compact_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    {
+        QSqlDatabase compactionDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        compactionDb.setDatabaseName(dbPath);
+        if (!compactionDb.open()) {
+            result.error = compactionDb.lastError().text();
+        } else {
+            QSqlQuery query(compactionDb);
+            query.exec("PRAGMA busy_timeout = 10000");
+            if (!query.exec("PRAGMA wal_checkpoint(TRUNCATE)")) {
+                result.error = query.lastError().text();
+            } else if (!query.exec("VACUUM")) {
+                result.error = query.lastError().text();
+            } else {
+                result.success = true;
+            }
+            compactionDb.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connName);
+    result.afterBytes = QFileInfo(dbPath).size();
+    return result;
 }
 
 } // namespace
@@ -1120,6 +1159,42 @@ bool DatabaseManager::moveDatabase(const QString &newPath)
 
     qInfo() << "Database moved to:" << newPath;
     return true;
+}
+
+void DatabaseManager::scheduleWeeklyCompaction(int intervalDays, int startupDelayMs)
+{
+    if (intervalDays <= 0 || startupDelayMs < 0) {
+        qWarning() << "Invalid compaction scheduling parameters:" << intervalDays << startupDelayMs;
+        return;
+    }
+
+    QTimer::singleShot(startupDelayMs, this, [this, intervalDays]() {
+        const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+        const QString lastRunValue = getSetting("db_last_compact_at");
+        const QDateTime lastRunUtc = QDateTime::fromString(lastRunValue, Qt::ISODate);
+        if (lastRunUtc.isValid() && lastRunUtc.daysTo(nowUtc) < intervalDays) {
+            return;
+        }
+
+        const QString dbPath = m_dbPath;
+        qInfo() << "Starting background database compaction for:" << dbPath;
+
+        auto compactionFuture = QtConcurrent::run([dbPath]() {
+            const CompactionResult result = compactDatabaseFile(dbPath);
+            QMetaObject::invokeMethod(&DatabaseManager::instance(), [result]() {
+                if (result.success) {
+                    DatabaseManager::instance().setSetting(
+                        "db_last_compact_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+                    qInfo() << "Database compaction finished. Before:" << result.beforeBytes
+                            << "After:" << result.afterBytes;
+                    return;
+                }
+
+                qWarning() << "Database compaction failed:" << result.error;
+            }, Qt::QueuedConnection);
+        });
+        Q_UNUSED(compactionFuture);
+    });
 }
 
 bool DatabaseManager::backupDatabase()

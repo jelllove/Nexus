@@ -20,6 +20,7 @@ public:
     bool moveDatabase(const QString &newPath);
     bool backupDatabase();
     void cleanupOldBackups(int maxBackups = 10);
+    void scheduleWeeklyCompaction(int intervalDays = 7, int startupDelayMs = 60000);
 
     // Product CRUD
     QList<Product> getAllProducts();

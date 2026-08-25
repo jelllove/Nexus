@@ -10,6 +10,7 @@ set(CMAKE_AUTOUIC ON)
 # Find Qt6 components
 find_package(Qt6 REQUIRED COMPONENTS
     Core
+    Concurrent
     Gui
     Widgets
     Sql
@@ -79,6 +80,7 @@ endif()
 # Link Qt6 libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
+    Qt6::Concurrent
     Qt6::Gui
     Qt6::Widgets
     Qt6::Sql
