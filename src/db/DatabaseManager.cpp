@@ -1113,27 +1113,53 @@ bool DatabaseManager::moveDatabase(const QString &newPath)
     if (newPath == m_dbPath)
         return true;
 
+    const QString oldPath = m_dbPath;
+    const bool targetExists = QFile::exists(newPath);
+
+    auto reopenOldDatabase = [this, &oldPath]() {
+        m_db.setDatabaseName(oldPath);
+        if (!m_db.open()) {
+            qCritical() << "Failed to reopen original database at:" << oldPath
+                        << m_db.lastError().text();
+        }
+    };
+
     // Close current connection
     m_db.close();
 
-    // Copy the file to new location
-    QDir().mkpath(QFileInfo(newPath).absolutePath());
-    if (QFile::exists(newPath)) {
-        QFile::remove(newPath);
+    // If the target database file already exists, switch to it directly.
+    if (targetExists) {
+        m_db.setDatabaseName(newPath);
+        if (!m_db.open()) {
+            qWarning() << "Failed to open existing database at new path:" << newPath;
+            reopenOldDatabase();
+            return false;
+        }
+
+        m_dbPath = newPath;
+        if (!createTables() || !createFtsTables() || !migrateDatabase()) {
+            qWarning() << "Failed to initialize existing database at new path:" << newPath;
+            m_db.close();
+            m_dbPath = oldPath;
+            reopenOldDatabase();
+            return false;
+        }
+
+        qInfo() << "Database switched to existing file:" << newPath;
+        return true;
     }
 
-    bool copied = QFile::copy(m_dbPath, newPath);
-    if (!copied) {
+    // Otherwise move the current database to the new location.
+    QDir().mkpath(QFileInfo(newPath).absolutePath());
+    if (!QFile::copy(oldPath, newPath)) {
         qWarning() << "Failed to copy database to" << newPath;
-        // Reopen at old path
-        m_db.setDatabaseName(m_dbPath);
-        m_db.open();
+        reopenOldDatabase();
         return false;
     }
 
     // Also copy WAL and SHM files if they exist
     for (const QString &suffix : {"-wal", "-shm"}) {
-        QString src = m_dbPath + suffix;
+        QString src = oldPath + suffix;
         QString dst = newPath + suffix;
         if (QFile::exists(src)) {
             QFile::remove(dst);
@@ -1145,13 +1171,11 @@ bool DatabaseManager::moveDatabase(const QString &newPath)
     m_db.setDatabaseName(newPath);
     if (!m_db.open()) {
         qWarning() << "Failed to open database at new path:" << newPath;
-        m_db.setDatabaseName(m_dbPath);
-        m_db.open();
+        reopenOldDatabase();
         return false;
     }
 
     // Remove old files
-    QString oldPath = m_dbPath;
     m_dbPath = newPath;
     QFile::remove(oldPath);
     QFile::remove(oldPath + "-wal");
