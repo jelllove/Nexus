@@ -44,8 +44,16 @@ int main(int argc, char *argv[])
     QString dbPath = settings.value("db_path").toString();
     bool dbReady = DatabaseManager::instance().initialize(dbPath.isEmpty() ? QString() : dbPath);
     if (!dbReady && !dbPath.isEmpty()) {
-        // Recover from stale custom path on another machine by retrying default location.
-        dbReady = DatabaseManager::instance().initialize();
+        const auto fallbackChoice = QMessageBox::warning(
+            nullptr,
+            "Nexus",
+            QString("Failed to open configured database path:\n%1\n\nUse default local database path instead?")
+                .arg(dbPath),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (fallbackChoice == QMessageBox::Yes) {
+            dbReady = DatabaseManager::instance().initialize();
+        }
     }
     if (!dbReady) {
         QMessageBox::critical(nullptr, "Nexus",
