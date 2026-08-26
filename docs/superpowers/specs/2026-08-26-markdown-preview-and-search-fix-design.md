@@ -53,6 +53,9 @@ Additionally, preview UX requires explicit copy format choices (Markdown and HTM
     - `Copy HTML`
     - `Save As .md`
     - `Close`
+- Window lifetime:
+  - keep a single preview window instance in `MainWindow`;
+  - opening preview again replaces content and raises the same window instead of spawning unlimited duplicates.
 - Copy behavior:
   - Markdown copy uses raw generated markdown string.
   - HTML copy uses markdown-rendered HTML output from the same source text.
@@ -92,7 +95,7 @@ Store a lightweight snapshot when entering search mode:
 - task pane mode (active/archived/deleted),
 - selected task id.
 
-On clear, reapply snapshot and reload corresponding list.
+On clear, reapply snapshot and reload corresponding list. If previous selected task no longer exists, keep list restored and clear editor selection.
 
 ## 6. Error Handling
 
@@ -142,4 +145,3 @@ On clear, reapply snapshot and reload corresponding list.
    - global search shows Active + Archived + Deleted results in task list,
    - clicking result opens editor,
    - clear search restores pre-search product/filter/task context.
-
