@@ -1,5 +1,5 @@
 #include "TaskExportService.h"
-#include <QMap>
+#include <QHash>
 #include <QRegularExpression>
 #include <QTextStream>
 
@@ -8,6 +8,15 @@ namespace {
 QString normalizeHeading(const QString &value, const QString &fallback)
 {
     QString text = value.trimmed();
+    if (text.isEmpty()) {
+        return fallback;
+    }
+    return text;
+}
+
+QString normalizeLine(const QString &value, const QString &fallback = QString())
+{
+    const QString text = value.simplified();
     if (text.isEmpty()) {
         return fallback;
     }
@@ -56,19 +65,21 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
         return markdown;
     }
 
-    QMap<QString, QList<ExportTaskItem>> groupedProducts;
+    QHash<QString, QList<ExportTaskItem>> groupedProducts;
+    QList<QString> productOrder;
     for (const ExportTaskItem &item : tasks) {
         const QString productKey = normalizeHeading(item.productName, "📁 Unknown Product");
+        if (!groupedProducts.contains(productKey)) {
+            productOrder.append(productKey);
+        }
         groupedProducts[productKey].append(item);
     }
 
-    for (auto it = groupedProducts.cbegin(); it != groupedProducts.cend(); ++it) {
-        const QString productName = it.key();
+    for (const QString &productName : productOrder) {
+        stream << "## 📚 " << normalizeLine(productName, "📁 Unknown Product") << "\n\n";
 
-        stream << "<details open>\n";
-        stream << "<summary>📚 " << productName.toHtmlEscaped() << "</summary>\n\n";
-
-        for (const ExportTaskItem &item : it.value()) {
+        const QList<ExportTaskItem> &productTasks = groupedProducts[productName];
+        for (const ExportTaskItem &item : productTasks) {
             const QString taskTitle = normalizeHeading(item.title, "📝 Untitled Task");
             const QString workStatusText = item.workStatusText.trimmed().isEmpty()
                 ? QString("Not Started")
@@ -77,41 +88,41 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
                 ? QString::fromUtf8("⏯️")
                 : item.workStatusIcon.trimmed();
 
-            stream << "<details>\n";
-            stream << "<summary>" << (workStatusIcon + " " + taskTitle).toHtmlEscaped() << "</summary>\n\n";
-            stream << "- **Status:** " << (workStatusIcon + " " + workStatusText).toHtmlEscaped() << "\n\n";
+            stream << "- " << normalizeLine(workStatusIcon, "⏯️")
+                   << " **" << normalizeLine(taskTitle, "Untitled Task") << "**\n";
+            stream << "  - **Status:** "
+                   << normalizeLine(workStatusIcon + " " + workStatusText, "⏯️ Not Started")
+                   << "\n";
 
             if (!item.simpleDescription.trimmed().isEmpty()) {
-                stream << "> 🧠 **AI Summary**\n";
-                stream << ">\n";
-                stream << "> ✨ " << item.simpleDescription.trimmed() << "\n\n";
+                stream << "  - 🧠 **AI Summary:** "
+                       << normalizeLine(item.simpleDescription)
+                       << "\n";
             }
 
             const QString previewText = fallbackSimpleDescription(item.contentHtml, 240);
             if (!previewText.trimmed().isEmpty()) {
-                stream << "<details>\n";
-                stream << "<summary>📝 Content Preview</summary>\n\n";
-                stream << previewText << "\n\n";
-                stream << "</details>\n\n";
+                stream << "  - 📝 **Content Preview:** "
+                       << normalizeLine(previewText, "📝 (empty)")
+                       << "\n";
             }
 
             if (item.subtasks.isEmpty()) {
-                stream << "- 💤 No sub tasks\n\n";
+                stream << "  - 💤 **Sub Tasks:** (none)\n";
             } else {
-                stream << "#### 🪜 Selected Sub Tasks\n\n";
+                stream << "  - 🪜 **Sub Tasks:**\n";
                 for (const ExportSubTaskItem &subtask : item.subtasks) {
                     const QString subTitle = normalizeHeading(subtask.title, "Untitled sub task");
-                    stream << "- [" << (subtask.completed ? "x" : " ") << "] "
+                    stream << "    - [" << (subtask.completed ? "x" : " ") << "] "
                            << (subtask.completed ? "✅ " : "⬜ ")
-                           << subTitle << "\n";
+                           << normalizeLine(subTitle, "Untitled sub task")
+                           << "\n";
                 }
-                stream << "\n";
             }
 
-            stream << "</details>\n\n";
+            stream << "\n";
         }
-
-        stream << "</details>\n\n";
+        stream << "\n";
     }
 
     return markdown;
