@@ -21,8 +21,8 @@ ExportProgressDialog::ExportProgressDialog(QWidget *parent)
     layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(10);
 
-    auto *title = new QLabel("Exporting tasks. Please wait...", this);
-    layout->addWidget(title);
+    m_titleLabel = new QLabel("Exporting tasks. Please wait...", this);
+    layout->addWidget(m_titleLabel);
 
     m_progressBar = new QProgressBar(this);
     m_progressBar->setRange(0, 100);
@@ -67,3 +67,12 @@ bool ExportProgressDialog::isCancelled() const
     return m_cancelled;
 }
 
+void ExportProgressDialog::setContextText(const QString &windowTitle, const QString &headline)
+{
+    if (!windowTitle.trimmed().isEmpty()) {
+        setWindowTitle(windowTitle.trimmed());
+    }
+    if (m_titleLabel && !headline.trimmed().isEmpty()) {
+        m_titleLabel->setText(headline.trimmed());
+    }
+}

@@ -5,6 +5,7 @@
 #include <QSplitter>
 #include <QMap>
 #include <QHash>
+#include <QPointer>
 #include <functional>
 #include "ui/ProductPane.h"
 #include "ui/TaskPane.h"
@@ -14,6 +15,7 @@
 #include "services/TaskExportService.h"
 
 class UpdateService;
+class MarkdownPreviewDialog;
 
 class MainWindow : public QMainWindow
 {
@@ -29,6 +31,7 @@ protected:
 private slots:
     void onProductSelected(int productId);
     void onTaskSelected(int taskId);
+    void onSubTaskSelected(int subTaskId);
     void onTaskTitleChanged(int taskId, const QString &title);
     void onSearchRequested(const QString &query);
     void onSearchCleared();
@@ -40,18 +43,34 @@ private slots:
     void onSummaryGenerated(const QString &summary);
     void onAIError(const QString &message);
     void exportTasksToMarkdown();
+    void previewTasksAsMarkdown();
     void showSettings();
     void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl, const QString &releaseNotes);
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
     void onDownloadFinished(const QString &installerPath);
 
 private:
+    struct PreparedMarkdownPayload {
+        QList<ExportTaskItem> items;
+        QString markdown;
+        bool includeDescription = false;
+        int fallbackCount = 0;
+    };
+
+    struct SearchViewSnapshot {
+        int productId = -1;
+        int selectedTaskId = -1;
+        TaskPane::ViewMode mode = TaskPane::ViewMode::Active;
+        bool valid = false;
+    };
+
     void setupUi();
     void setupTrayIcon();
     void setupGlobalHotkey();
     void setupMenuBar();
     void toggleVisibility();
     void checkForUpdates();
+    bool prepareMarkdownPayload(PreparedMarkdownPayload &payload, const QString &actionName);
     bool promptExportScopeDialog(bool &exportAllProducts, int &selectedProductId, bool &includeDescription);
     bool promptTaskSelectionDialog(
         const QMap<int, QList<Task>> &tasksByProduct,
@@ -79,4 +98,7 @@ private:
     // State
     int m_currentTaskIdForTitle = -1;
     int m_currentTaskIdForSummary = -1;
+    bool m_searchActive = false;
+    SearchViewSnapshot m_searchSnapshot;
+    QPointer<MarkdownPreviewDialog> m_markdownPreviewDialog;
 };

@@ -81,11 +81,12 @@ void EditorPane::setupUi()
 void EditorPane::loadTask(int taskId)
 {
     // Save current task before switching
-    if (m_currentTaskId > 0 && m_autoSaveTimer->isActive()) {
+    if ((m_currentTaskId > 0 || m_currentSubTaskId > 0) && m_autoSaveTimer->isActive()) {
         onAutoSave();
     }
 
     m_currentTaskId = taskId;
+    m_currentSubTaskId = -1;
 
     if (taskId <= 0) {
         clear();
@@ -119,9 +120,51 @@ void EditorPane::loadTask(int taskId)
     }
 }
 
+void EditorPane::loadSubTask(int subTaskId)
+{
+    // Save current entry before switching
+    if ((m_currentTaskId > 0 || m_currentSubTaskId > 0) && m_autoSaveTimer->isActive()) {
+        onAutoSave();
+    }
+
+    m_currentTaskId = -1;
+    m_currentSubTaskId = subTaskId;
+
+    if (subTaskId <= 0) {
+        clear();
+        return;
+    }
+
+    SubTask subTask = DatabaseManager::instance().getSubtask(subTaskId);
+
+    QString title = subTask.title;
+    QString content = subTask.content;
+    QString timestamp;
+    if (subTask.updatedAt.isValid()) {
+        timestamp = subTask.updatedAt.toString("dddd, MMMM d, yyyy    h:mm AP");
+    } else if (subTask.createdAt.isValid()) {
+        timestamp = subTask.createdAt.toString("dddd, MMMM d, yyyy    h:mm AP");
+    }
+
+    if (m_editorReady) {
+        QString escapedTitle = title;
+        escapedTitle.replace("'", "\\'");
+        m_webView->page()->runJavaScript(
+            QString("window.setPageTitle('%1')").arg(escapedTitle));
+        m_webView->page()->runJavaScript(
+            QString("window.setPageTimestamp('%1')").arg(timestamp));
+        m_bridge->loadContent(content);
+    } else {
+        m_pendingContent = content;
+        m_pendingTitle = title;
+        m_pendingTimestamp = timestamp;
+    }
+}
+
 void EditorPane::clear()
 {
     m_currentTaskId = -1;
+    m_currentSubTaskId = -1;
     if (m_editorReady) {
         m_webView->page()->runJavaScript("window.setPageTitle('')");
         m_webView->page()->runJavaScript("window.setPageTimestamp('')");
@@ -131,14 +174,19 @@ void EditorPane::clear()
 
 void EditorPane::onEditorContentChanged(const QString &content)
 {
-    if (m_currentTaskId <= 0) return;
+    if (m_currentTaskId <= 0 && m_currentSubTaskId <= 0) return;
 
     // Check if this is a title change from the page title field
     if (content.startsWith("__TITLE__:")) {
         QString newTitle = content.mid(10);
         if (!newTitle.isEmpty()) {
-            DatabaseManager::instance().updateTaskTitle(m_currentTaskId, newTitle);
-            emit titleChanged(m_currentTaskId, newTitle);
+            if (m_currentTaskId > 0) {
+                DatabaseManager::instance().updateTaskTitle(m_currentTaskId, newTitle);
+                emit titleChanged(m_currentTaskId, newTitle);
+            } else if (m_currentSubTaskId > 0) {
+                DatabaseManager::instance().renameSubtask(m_currentSubTaskId, newTitle);
+                emit titleChanged(m_currentSubTaskId, newTitle);
+            }
         }
         return;
     }
@@ -166,30 +214,36 @@ void EditorPane::onEditorReady()
 
 void EditorPane::onAutoSave()
 {
-    if (m_currentTaskId <= 0) return;
-
     QString content = m_bridge->content();
 
-    // Save to database
-    DatabaseManager::instance().updateTaskContent(m_currentTaskId, content);
+    if (m_currentTaskId > 0) {
+        // Save to database
+        DatabaseManager::instance().updateTaskContent(m_currentTaskId, content);
 
-    // Save snapshot for undo history
-    DatabaseManager::instance().saveContentSnapshot(m_currentTaskId, content);
+        // Save snapshot for undo history
+        DatabaseManager::instance().saveContentSnapshot(m_currentTaskId, content);
 
-    emit contentChanged(m_currentTaskId, content);
+        emit contentChanged(m_currentTaskId, content);
 
-    // Auto-generate title if empty
-    if (!m_titleGenerationPending) {
-        Task task = DatabaseManager::instance().getTask(m_currentTaskId);
-        if (task.title.trimmed().isEmpty()) {
-            QString plain = content;
-            plain.remove(QRegularExpression("<[^>]*>"));
-            plain = plain.trimmed();
-            if (!plain.isEmpty()) {
-                m_titleGenerationPending = true;
-                emit autoGenerateTitleRequested(m_currentTaskId, content);
+        // Auto-generate title if empty
+        if (!m_titleGenerationPending) {
+            Task task = DatabaseManager::instance().getTask(m_currentTaskId);
+            if (task.title.trimmed().isEmpty()) {
+                QString plain = content;
+                plain.remove(QRegularExpression("<[^>]*>"));
+                plain = plain.trimmed();
+                if (!plain.isEmpty()) {
+                    m_titleGenerationPending = true;
+                    emit autoGenerateTitleRequested(m_currentTaskId, content);
+                }
             }
         }
+        return;
+    }
+
+    if (m_currentSubTaskId > 0) {
+        DatabaseManager::instance().updateSubtaskContent(m_currentSubTaskId, content);
+        emit contentChanged(m_currentSubTaskId, content);
     }
 }
 

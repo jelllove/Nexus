@@ -29,6 +29,7 @@ set(SOURCES
     src/ui/TaskPane.cpp
     src/ui/TaskCardDelegate.cpp
     src/ui/ExportProgressDialog.cpp
+    src/ui/MarkdownPreviewDialog.cpp
     src/ui/EditorPane.cpp
     src/ui/SearchBar.cpp
     src/ui/SettingsDialog.cpp
@@ -51,6 +52,7 @@ set(HEADERS
     src/ui/TaskPane.h
     src/ui/TaskCardDelegate.h
     src/ui/ExportProgressDialog.h
+    src/ui/MarkdownPreviewDialog.h
     src/ui/EditorPane.h
     src/ui/SearchBar.h
     src/ui/SettingsDialog.h

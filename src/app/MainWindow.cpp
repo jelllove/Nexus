@@ -6,6 +6,7 @@
 #include "platform/GlobalHotkey.h"
 #include "db/DatabaseManager.h"
 #include "ui/ExportProgressDialog.h"
+#include "ui/MarkdownPreviewDialog.h"
 #include <QCloseEvent>
 #include <QMenuBar>
 #include <QMenu>
@@ -33,6 +34,7 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <QPointer>
+#include <QSignalBlocker>
 #include <memory>
 
 #ifdef Q_OS_WIN
@@ -111,6 +113,8 @@ void MainWindow::setupUi()
             this, &MainWindow::onProductSelected);
     connect(m_taskPane, &TaskPane::taskSelected,
             this, &MainWindow::onTaskSelected);
+    connect(m_taskPane, &TaskPane::subTaskSelected,
+            this, &MainWindow::onSubTaskSelected);
     connect(m_searchBar, &SearchBar::searchRequested,
             this, &MainWindow::onSearchRequested);
     connect(m_searchBar, &SearchBar::searchCleared,
@@ -134,6 +138,9 @@ void MainWindow::setupMenuBar()
 
     QAction *exportAction = fileMenu->addAction("Export &Tasks to Markdown...");
     connect(exportAction, &QAction::triggered, this, &MainWindow::exportTasksToMarkdown);
+
+    QAction *previewAction = fileMenu->addAction("Preview Selected Tasks as &Markdown...");
+    connect(previewAction, &QAction::triggered, this, &MainWindow::previewTasksAsMarkdown);
 
     fileMenu->addSeparator();
 
@@ -242,6 +249,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::onProductSelected(int productId)
 {
+    m_searchActive = false;
+    m_searchSnapshot = {};
+
+    const QSignalBlocker blocker(m_searchBar);
     m_searchBar->clear();
     m_taskPane->loadTasks(productId);
     m_editorPane->clear();
@@ -252,26 +263,61 @@ void MainWindow::onTaskSelected(int taskId)
     m_editorPane->loadTask(taskId);
 }
 
+void MainWindow::onSubTaskSelected(int subTaskId)
+{
+    m_editorPane->loadSubTask(subTaskId);
+}
+
 void MainWindow::onSearchRequested(const QString &query)
 {
-    auto results = DatabaseManager::instance().searchTasks(query);
+    const QString trimmedQuery = query.trimmed();
+    if (trimmedQuery.isEmpty()) {
+        onSearchCleared();
+        return;
+    }
+
+    if (!m_searchActive) {
+        m_searchSnapshot.productId = m_productPane->selectedProductId();
+        m_searchSnapshot.selectedTaskId = m_taskPane->selectedTaskId();
+        m_searchSnapshot.mode = m_taskPane->viewMode();
+        m_searchSnapshot.valid = true;
+    }
+
+    const auto results = DatabaseManager::instance().searchTasks(trimmedQuery);
+    m_taskPane->loadSearchResults(results, trimmedQuery);
+    m_searchActive = true;
+
     if (results.isEmpty()) {
-        statusBar()->showMessage(QString("No results found for '%1'").arg(query), 3000);
+        statusBar()->showMessage(QString("No results found for '%1'").arg(trimmedQuery), 3000);
     } else {
         statusBar()->showMessage(QString("Found %1 result(s)").arg(results.size()), 3000);
     }
-    // Show results in task pane
-    // We need to access the model directly through the task pane
-    // For now, show a message
 }
 
 void MainWindow::onSearchCleared()
 {
-    // Reload current product's tasks
-    int productId = m_productPane->selectedProductId();
-    if (productId > 0) {
-        m_taskPane->loadTasks(productId);
+    if (!m_searchActive || !m_searchSnapshot.valid) {
+        const int productId = m_productPane->selectedProductId();
+        if (productId > 0) {
+            m_taskPane->loadTasks(productId);
+        } else {
+            m_taskPane->restoreView(-1, TaskPane::ViewMode::Active, -1);
+        }
+        return;
     }
+
+    if (m_searchSnapshot.productId > 0) {
+        m_productPane->selectProductById(m_searchSnapshot.productId, false);
+    }
+
+    m_taskPane->restoreView(
+        m_searchSnapshot.productId,
+        m_searchSnapshot.mode,
+        m_searchSnapshot.selectedTaskId);
+
+    m_searchActive = false;
+    m_searchSnapshot = {};
+    statusBar()->showMessage("Search cleared", 2000);
 }
 
 void MainWindow::onHotkeyPressed()
@@ -305,6 +351,15 @@ void MainWindow::onTaskTitleChanged(int taskId, const QString &title)
 {
     Q_UNUSED(taskId);
     Q_UNUSED(title);
+
+    if (m_searchActive) {
+        const QString query = m_searchBar->searchText();
+        if (!query.isEmpty()) {
+            onSearchRequested(query);
+        }
+        return;
+    }
+
     // Refresh task list to show updated title
     int productId = m_productPane->selectedProductId();
     if (productId > 0) {
@@ -325,9 +380,16 @@ void MainWindow::onTitleGenerated(const QString &title)
         DatabaseManager::instance().updateTaskTitle(m_currentTaskIdForTitle, title);
         statusBar()->showMessage(QString("Title updated: %1").arg(title), 5000);
         // Refresh task list
-        int productId = m_productPane->selectedProductId();
-        if (productId > 0) {
-            m_taskPane->loadTasks(productId);
+        if (m_searchActive) {
+            const QString query = m_searchBar->searchText();
+            if (!query.isEmpty()) {
+                onSearchRequested(query);
+            }
+        } else {
+            int productId = m_productPane->selectedProductId();
+            if (productId > 0) {
+                m_taskPane->loadTasks(productId);
+            }
         }
         // Reload editor to show new title
         m_editorPane->loadTask(m_currentTaskIdForTitle);
@@ -377,45 +439,9 @@ void MainWindow::showSettings()
 
 void MainWindow::exportTasksToMarkdown()
 {
-    bool exportAllProducts = true;
-    int selectedProductId = -1;
-    bool includeDescription = false;
-
-    if (!promptExportScopeDialog(exportAllProducts, selectedProductId, includeDescription)) {
+    PreparedMarkdownPayload payload;
+    if (!prepareMarkdownPayload(payload, "Export Tasks")) {
         return;
-    }
-
-    QHash<int, QString> productNames;
-    QMap<int, QList<Task>> tasksByProduct = collectActiveTasksForExport(
-        exportAllProducts, selectedProductId, productNames);
-
-    if (tasksByProduct.isEmpty()) {
-        QMessageBox::information(this, "Export Tasks",
-                                 "No active tasks found in the selected scope.");
-        return;
-    }
-
-    QList<ExportTaskItem> selectedExportItems;
-    if (!promptTaskSelectionDialog(tasksByProduct, productNames, selectedExportItems)) {
-        return;
-    }
-
-    if (selectedExportItems.isEmpty()) {
-        QMessageBox::information(this, "Export Tasks",
-                                 "Please select at least one task to export.");
-        return;
-    }
-
-    if (includeDescription) {
-        const auto confirm = QMessageBox::question(
-            this,
-            "Confirm AI Summarization",
-            "AI summarization is enabled. Nexus will call your configured AI endpoint "
-            "to generate one-line summaries for selected tasks.\n\nContinue?",
-            QMessageBox::Yes | QMessageBox::No);
-        if (confirm != QMessageBox::Yes) {
-            return;
-        }
     }
 
     QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
@@ -431,19 +457,120 @@ void MainWindow::exportTasksToMarkdown()
         defaultPath,
         "Markdown Files (*.md)");
     if (path.isEmpty()) {
+        statusBar()->showMessage("Export cancelled", 3000);
         return;
     }
     if (!path.endsWith(".md", Qt::CaseInsensitive)) {
         path += ".md";
     }
 
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(
+            this, "Export Failed",
+            "Failed to write markdown file:\n" + file.errorString());
+        statusBar()->showMessage("Export failed", 5000);
+        return;
+    }
+    file.write(payload.markdown.toUtf8());
+    file.close();
+
+    QString message = QString("Exported %1 task(s) to:\n%2")
+                          .arg(payload.items.size())
+                          .arg(path);
+    if (payload.includeDescription && payload.fallbackCount > 0) {
+        message += QString(
+            "\n\n%1 task description(s) used fallback text because AI was unavailable or failed.")
+                       .arg(payload.fallbackCount);
+    }
+
+    QMessageBox::information(this, "Export Complete", message);
+    statusBar()->showMessage(
+        QString("Export complete: %1 task(s)").arg(payload.items.size()), 6000);
+}
+
+void MainWindow::previewTasksAsMarkdown()
+{
+    PreparedMarkdownPayload payload;
+    if (!prepareMarkdownPayload(payload, "Preview Tasks")) {
+        return;
+    }
+
+    if (!m_markdownPreviewDialog) {
+        m_markdownPreviewDialog = new MarkdownPreviewDialog(this);
+    }
+
+    m_markdownPreviewDialog->setMarkdownContent(payload.markdown);
+    m_markdownPreviewDialog->show();
+    m_markdownPreviewDialog->raise();
+    m_markdownPreviewDialog->activateWindow();
+
+    QString status = QString("Preview ready: %1 task(s)").arg(payload.items.size());
+    if (payload.includeDescription && payload.fallbackCount > 0) {
+        status += QString(" (%1 fallback summary)").arg(payload.fallbackCount);
+    }
+    statusBar()->showMessage(status, 6000);
+}
+
+bool MainWindow::prepareMarkdownPayload(PreparedMarkdownPayload &payload, const QString &actionName)
+{
+    bool exportAllProducts = true;
+    int selectedProductId = -1;
+    bool includeDescription = false;
+
+    if (!promptExportScopeDialog(exportAllProducts, selectedProductId, includeDescription)) {
+        return false;
+    }
+
+    QHash<int, QString> productNames;
+    QMap<int, QList<Task>> tasksByProduct = collectActiveTasksForExport(
+        exportAllProducts, selectedProductId, productNames);
+
+    if (tasksByProduct.isEmpty()) {
+        QMessageBox::information(this, actionName,
+                                 "No active tasks found in the selected scope.");
+        return false;
+    }
+
+    QList<ExportTaskItem> selectedExportItems;
+    if (!promptTaskSelectionDialog(tasksByProduct, productNames, selectedExportItems)) {
+        return false;
+    }
+
+    if (selectedExportItems.isEmpty()) {
+        QMessageBox::information(this, actionName,
+                                 "Please select at least one task.");
+        return false;
+    }
+
+    if (includeDescription) {
+        const auto confirm = QMessageBox::question(
+            this,
+            "Confirm AI Summarization",
+            "AI summarization is enabled. Nexus will call your configured AI endpoint "
+            "to generate one-line summaries for selected tasks.\n\nContinue?",
+            QMessageBox::Yes | QMessageBox::No);
+        if (confirm != QMessageBox::Yes) {
+            return false;
+        }
+    }
+
     const int summaryUnits = includeDescription ? selectedExportItems.size() : 0;
     const int totalUnits = qMax(2, summaryUnits + 2);
     int completedUnits = 0;
+    const QString cancelStatusMessage = actionName.startsWith("Preview")
+        ? "Preview cancelled"
+        : "Export cancelled";
 
     ExportProgressDialog progressDialog(this);
+    if (actionName.startsWith("Preview")) {
+        progressDialog.setContextText("Preview Progress", "Preparing markdown preview. Please wait...");
+        progressDialog.appendLog("Preview preparation started.");
+    } else {
+        progressDialog.setContextText("Export Progress", "Exporting tasks. Please wait...");
+        progressDialog.appendLog("Export started.");
+    }
     progressDialog.setProgress(0, totalUnits);
-    progressDialog.appendLog("Export started.");
     progressDialog.show();
 
     auto setProgress = [&](int completed, const QString &message) {
@@ -455,11 +582,13 @@ void MainWindow::exportTasksToMarkdown()
     };
 
     if (progressDialog.isCancelled()) {
-        statusBar()->showMessage("Export cancelled", 5000);
-        return;
+        statusBar()->showMessage(cancelStatusMessage, 5000);
+        return false;
     }
 
-    statusBar()->showMessage("Exporting tasks...");
+    statusBar()->showMessage(actionName.startsWith("Preview")
+                                 ? "Preparing markdown preview..."
+                                 : "Exporting tasks...");
     int fallbackCount = 0;
     const bool summariesDone = resolveSimpleDescriptions(
         selectedExportItems, includeDescription, fallbackCount,
@@ -472,9 +601,9 @@ void MainWindow::exportTasksToMarkdown()
         });
 
     if (!summariesDone) {
-        progressDialog.appendLog("Export cancelled before markdown generation.");
-        statusBar()->showMessage("Export cancelled", 5000);
-        return;
+        progressDialog.appendLog("Cancelled before markdown generation.");
+        statusBar()->showMessage(cancelStatusMessage, 5000);
+        return false;
     }
 
     if (!includeDescription) {
@@ -482,9 +611,9 @@ void MainWindow::exportTasksToMarkdown()
     }
 
     if (progressDialog.isCancelled()) {
-        progressDialog.appendLog("Export cancelled before markdown build.");
-        statusBar()->showMessage("Export cancelled", 5000);
-        return;
+        progressDialog.appendLog("Cancelled before markdown build.");
+        statusBar()->showMessage(cancelStatusMessage, 5000);
+        return false;
     }
 
     setProgress(summaryUnits + 1, "Building markdown content.");
@@ -492,39 +621,20 @@ void MainWindow::exportTasksToMarkdown()
         selectedExportItems, QDateTime::currentDateTime());
 
     if (progressDialog.isCancelled()) {
-        progressDialog.appendLog("Export cancelled before writing file.");
-        statusBar()->showMessage("Export cancelled", 5000);
-        return;
+        progressDialog.appendLog("Cancelled after markdown build.");
+        statusBar()->showMessage(cancelStatusMessage, 5000);
+        return false;
     }
 
-    setProgress(summaryUnits + 2, "Writing markdown file.");
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        progressDialog.appendLog("Failed to open output file for writing.");
-        QMessageBox::warning(
-            this, "Export Failed",
-            "Failed to write markdown file:\n" + file.errorString());
-        statusBar()->showMessage("Export failed", 5000);
-        return;
-    }
-    file.write(markdown.toUtf8());
-    file.close();
-    progressDialog.appendLog("Export completed successfully.");
+    setProgress(summaryUnits + 2, "Markdown content ready.");
+    progressDialog.appendLog("Preparation completed successfully.");
     progressDialog.close();
 
-    QString message = QString("Exported %1 task(s) to:\n%2")
-                          .arg(selectedExportItems.size())
-                          .arg(path);
-    if (includeDescription && fallbackCount > 0) {
-        message += QString(
-            "\n\n%1 task description(s) used fallback text because AI was unavailable or failed.")
-                       .arg(fallbackCount);
-    }
-
-    QMessageBox::information(this, "Export Complete", message);
-    statusBar()->showMessage(
-        QString("Export complete: %1 task(s)").arg(selectedExportItems.size()), 6000);
+    payload.items = selectedExportItems;
+    payload.markdown = markdown;
+    payload.includeDescription = includeDescription;
+    payload.fallbackCount = fallbackCount;
+    return true;
 }
 
 bool MainWindow::promptExportScopeDialog(bool &exportAllProducts,

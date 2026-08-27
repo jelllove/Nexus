@@ -29,8 +29,11 @@ struct SubTask {
     int id = -1;
     int taskId = -1;
     QString title;
+    QString content;
     bool completed = false;
     int sortOrder = 0;
+    QDateTime createdAt;
+    QDateTime updatedAt;
 };
 
 struct Task {

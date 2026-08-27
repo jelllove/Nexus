@@ -23,6 +23,18 @@ ProductStatus productStatusFromDb(const QString &value)
         : ProductStatus::Active;
 }
 
+TaskStatus taskStatusFromDb(const QString &value)
+{
+    const QString normalized = value.trimmed().toLower();
+    if (normalized == "deleted") {
+        return TaskStatus::Deleted;
+    }
+    if (normalized == "archived") {
+        return TaskStatus::Archived;
+    }
+    return TaskStatus::Active;
+}
+
 bool queryProductStatusColumns(QSqlDatabase &db, bool &hasStatus, bool &hasArchivedAt)
 {
     hasStatus = false;
@@ -293,9 +305,11 @@ bool DatabaseManager::migrateDatabase()
             "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "  task_id INTEGER NOT NULL,"
             "  title TEXT NOT NULL DEFAULT '',"
+            "  content TEXT DEFAULT '',"
             "  completed INTEGER DEFAULT 0,"
             "  sort_order INTEGER DEFAULT 0,"
             "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+            "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
             "  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE"
             ")")) {
             qWarning() << "Failed to create subtasks table:" << query.lastError().text();
@@ -341,6 +355,55 @@ bool DatabaseManager::migrateDatabase()
             setSetting("db_version", "7");
             dbVersion = 7;
         }
+    }
+
+    // Migration v7 -> v8: ensure subtasks.content / subtasks.updated_at exist
+    if (dbVersion < 8) {
+        if (!query.exec(
+                "CREATE TABLE IF NOT EXISTS subtasks ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  task_id INTEGER NOT NULL,"
+                "  title TEXT NOT NULL DEFAULT '',"
+                "  content TEXT DEFAULT '',"
+                "  completed INTEGER DEFAULT 0,"
+                "  sort_order INTEGER DEFAULT 0,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE"
+                ")")) {
+            qWarning() << "Failed to ensure subtasks table before migration v8:" << query.lastError().text();
+            return false;
+        }
+
+        query.exec("PRAGMA table_info(subtasks)");
+        bool hasContent = false;
+        bool hasUpdatedAt = false;
+        while (query.next()) {
+            const QString col = query.value(1).toString();
+            if (col == "content") {
+                hasContent = true;
+            } else if (col == "updated_at") {
+                hasUpdatedAt = true;
+            }
+        }
+
+        if (!hasContent) {
+            if (!query.exec("ALTER TABLE subtasks ADD COLUMN content TEXT DEFAULT ''")) {
+                qWarning() << "Failed to add subtasks.content column:" << query.lastError().text();
+                return false;
+            }
+        }
+
+        if (!hasUpdatedAt) {
+            if (!query.exec("ALTER TABLE subtasks ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP")) {
+                qWarning() << "Failed to add subtasks.updated_at column:" << query.lastError().text();
+                return false;
+            }
+        }
+
+        setSetting("db_version", "8");
+        dbVersion = 8;
+        qInfo() << "Migration v8: ensured subtasks content and updated_at";
     }
 
     return true;
@@ -603,7 +666,12 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
 {
     QList<Task> tasks;
     QSqlQuery query(m_db);
-    QString statusStr = (status == TaskStatus::Active) ? "active" : "archived";
+    QString statusStr = "active";
+    if (status == TaskStatus::Archived) {
+        statusStr = "archived";
+    } else if (status == TaskStatus::Deleted) {
+        statusStr = "deleted";
+    }
     query.prepare(
         "SELECT id, product_id, title, content, priority, status, sort_order, "
         "created_at, updated_at, archived_at, due_date, work_status "
@@ -620,7 +688,7 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
         t.title = query.value(2).toString();
         t.content = query.value(3).toString();
         t.priority = static_cast<TaskPriority>(query.value(4).toInt());
-        t.status = (query.value(5).toString() == "active") ? TaskStatus::Active : TaskStatus::Archived;
+        t.status = taskStatusFromDb(query.value(5).toString());
         t.sortOrder = query.value(6).toInt();
         t.createdAt = query.value(7).toDateTime();
         t.updatedAt = query.value(8).toDateTime();
@@ -647,7 +715,7 @@ Task DatabaseManager::getTask(int id)
         t.title = query.value(2).toString();
         t.content = query.value(3).toString();
         t.priority = static_cast<TaskPriority>(query.value(4).toInt());
-        t.status = (query.value(5).toString() == "active") ? TaskStatus::Active : TaskStatus::Archived;
+        t.status = taskStatusFromDb(query.value(5).toString());
         t.sortOrder = query.value(6).toInt();
         t.createdAt = query.value(7).toDateTime();
         t.updatedAt = query.value(8).toDateTime();
@@ -691,7 +759,13 @@ bool DatabaseManager::updateTask(const Task &task)
     query.addBindValue(task.title);
     query.addBindValue(task.content);
     query.addBindValue(static_cast<int>(task.priority));
-    query.addBindValue(task.status == TaskStatus::Active ? "active" : "archived");
+    QString statusText = "active";
+    if (task.status == TaskStatus::Archived) {
+        statusText = "archived";
+    } else if (task.status == TaskStatus::Deleted) {
+        statusText = "deleted";
+    }
+    query.addBindValue(statusText);
     query.addBindValue(task.sortOrder);
     query.addBindValue(task.id);
     if (query.exec()) {
@@ -877,11 +951,31 @@ bool DatabaseManager::reorderTasks(const QList<int> &taskIds)
 
 // --- Sub-tasks ---
 
+SubTask DatabaseManager::getSubtask(int subtaskId)
+{
+    SubTask st;
+    QSqlQuery query(m_db);
+    query.prepare("SELECT id, task_id, title, content, completed, sort_order, created_at, updated_at "
+                  "FROM subtasks WHERE id = ?");
+    query.addBindValue(subtaskId);
+    if (query.exec() && query.next()) {
+        st.id = query.value(0).toInt();
+        st.taskId = query.value(1).toInt();
+        st.title = query.value(2).toString();
+        st.content = query.value(3).toString();
+        st.completed = query.value(4).toBool();
+        st.sortOrder = query.value(5).toInt();
+        st.createdAt = query.value(6).toDateTime();
+        st.updatedAt = query.value(7).toDateTime();
+    }
+    return st;
+}
+
 QList<SubTask> DatabaseManager::getSubtasks(int taskId)
 {
     QList<SubTask> subtasks;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, task_id, title, completed, sort_order FROM subtasks "
+    query.prepare("SELECT id, task_id, title, content, completed, sort_order, created_at, updated_at FROM subtasks "
                   "WHERE task_id = ? ORDER BY sort_order ASC, id ASC");
     query.addBindValue(taskId);
     query.exec();
@@ -890,8 +984,11 @@ QList<SubTask> DatabaseManager::getSubtasks(int taskId)
         st.id = query.value(0).toInt();
         st.taskId = query.value(1).toInt();
         st.title = query.value(2).toString();
-        st.completed = query.value(3).toBool();
-        st.sortOrder = query.value(4).toInt();
+        st.content = query.value(3).toString();
+        st.completed = query.value(4).toBool();
+        st.sortOrder = query.value(5).toInt();
+        st.createdAt = query.value(6).toDateTime();
+        st.updatedAt = query.value(7).toDateTime();
         subtasks.append(st);
     }
     return subtasks;
@@ -911,8 +1008,8 @@ int DatabaseManager::getSubtaskCount(int taskId)
 int DatabaseManager::addSubtask(int taskId, const QString &title)
 {
     QSqlQuery query(m_db);
-    query.prepare("INSERT INTO subtasks (task_id, title, sort_order) "
-                  "VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?))");
+    query.prepare("INSERT INTO subtasks (task_id, title, sort_order, updated_at) "
+                  "VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?), CURRENT_TIMESTAMP)");
     query.addBindValue(taskId);
     query.addBindValue(title);
     query.addBindValue(taskId);
@@ -925,8 +1022,17 @@ int DatabaseManager::addSubtask(int taskId, const QString &title)
 bool DatabaseManager::toggleSubtask(int subtaskId, bool completed)
 {
     QSqlQuery query(m_db);
-    query.prepare("UPDATE subtasks SET completed = ? WHERE id = ?");
+    query.prepare("UPDATE subtasks SET completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
     query.addBindValue(completed ? 1 : 0);
+    query.addBindValue(subtaskId);
+    return query.exec();
+}
+
+bool DatabaseManager::updateSubtaskContent(int subtaskId, const QString &content)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE subtasks SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(content);
     query.addBindValue(subtaskId);
     return query.exec();
 }
@@ -942,7 +1048,7 @@ bool DatabaseManager::deleteSubtask(int subtaskId)
 bool DatabaseManager::renameSubtask(int subtaskId, const QString &title)
 {
     QSqlQuery query(m_db);
-    query.prepare("UPDATE subtasks SET title = ? WHERE id = ?");
+    query.prepare("UPDATE subtasks SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
     query.addBindValue(title);
     query.addBindValue(subtaskId);
     return query.exec();
@@ -1050,7 +1156,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         t.title = q.value(2).toString();
         t.content = q.value(3).toString();
         t.priority = static_cast<TaskPriority>(q.value(4).toInt());
-        t.status = (q.value(5).toString() == "active") ? TaskStatus::Active : TaskStatus::Archived;
+        t.status = taskStatusFromDb(q.value(5).toString());
         t.sortOrder = q.value(6).toInt();
         t.createdAt = q.value(7).toDateTime();
         t.updatedAt = q.value(8).toDateTime();

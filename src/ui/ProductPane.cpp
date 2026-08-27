@@ -166,19 +166,7 @@ void ProductPane::loadProducts()
     if (currentProduct <= 0) {
         return;
     }
-
-    int activeRow = m_activeModel->rowForProductId(currentProduct);
-    if (activeRow >= 0) {
-        QModelIndex idx = m_activeModel->index(activeRow);
-        onProductClicked(m_activeListView, m_activeModel, idx);
-        return;
-    }
-
-    int archivedRow = m_archivedModel->rowForProductId(currentProduct);
-    if (archivedRow >= 0) {
-        QModelIndex idx = m_archivedModel->index(archivedRow);
-        onProductClicked(m_archivedListView, m_archivedModel, idx);
-    }
+    selectProductById(currentProduct, true);
 }
 
 int ProductPane::selectedProductId() const
@@ -190,6 +178,42 @@ int ProductPane::selectedProductId() const
     QModelIndex index = view->currentIndex();
     if (!index.isValid()) return -1;
     return model->productIdAt(index.row());
+}
+
+bool ProductPane::selectProductById(int productId, bool emitSelection)
+{
+    if (productId <= 0) {
+        return false;
+    }
+
+    const int activeRow = m_activeModel->rowForProductId(productId);
+    if (activeRow >= 0) {
+        QModelIndex idx = m_activeModel->index(activeRow);
+        setCurrentListView(m_activeListView);
+        m_activeListView->setCurrentIndex(idx);
+        m_activeListView->scrollTo(idx);
+        if (emitSelection) {
+            emit productSelected(productId);
+        }
+        return true;
+    }
+
+    const int archivedRow = m_archivedModel->rowForProductId(productId);
+    if (archivedRow >= 0) {
+        if (!m_showArchivedButton->isChecked()) {
+            m_showArchivedButton->setChecked(true);
+        }
+        QModelIndex idx = m_archivedModel->index(archivedRow);
+        setCurrentListView(m_archivedListView);
+        m_archivedListView->setCurrentIndex(idx);
+        m_archivedListView->scrollTo(idx);
+        if (emitSelection) {
+            emit productSelected(productId);
+        }
+        return true;
+    }
+
+    return false;
 }
 
 void ProductPane::onProductClicked(QListView *sourceView, ProductListModel *sourceModel,

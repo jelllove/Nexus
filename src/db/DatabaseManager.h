@@ -53,9 +53,11 @@ public:
     bool reorderTasks(const QList<int> &taskIds);
 
     // Sub-task CRUD
+    SubTask getSubtask(int subtaskId);
     QList<SubTask> getSubtasks(int taskId);
     int getSubtaskCount(int taskId);
     int addSubtask(int taskId, const QString &title);
+    bool updateSubtaskContent(int subtaskId, const QString &content);
     bool toggleSubtask(int subtaskId, bool completed);
     bool deleteSubtask(int subtaskId);
     bool renameSubtask(int subtaskId, const QString &title);

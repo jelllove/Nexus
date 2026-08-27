@@ -17,6 +17,7 @@ public:
     explicit EditorPane(QWidget *parent = nullptr);
 
     void loadTask(int taskId);
+    void loadSubTask(int subTaskId);
     void clear();
     void resetTitleGenerationPending() { m_titleGenerationPending = false; }
 
@@ -42,6 +43,7 @@ private:
     QTimer *m_autoSaveTimer;
 
     int m_currentTaskId = -1;
+    int m_currentSubTaskId = -1;
     bool m_editorReady = false;
     QString m_pendingContent;
     QString m_pendingTitle;

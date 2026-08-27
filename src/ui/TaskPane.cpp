@@ -96,24 +96,36 @@ void TaskPane::setupUi()
     connect(m_activeButton, &QPushButton::clicked, this, [this]() {
         m_showingArchived = false;
         m_showingDeleted = false;
+        m_showingSearchResults = false;
+        m_searchQuery.clear();
+        m_addButton->setEnabled(true);
         updateFilterButtonStyles();
         if (m_currentProductId > 0) {
             m_model->loadTasks(m_currentProductId, TaskStatus::Active);
         }
+        m_titleLabel->setText("Tasks");
     });
     connect(m_archivedButton, &QPushButton::clicked, this, [this]() {
         m_showingArchived = true;
         m_showingDeleted = false;
+        m_showingSearchResults = false;
+        m_searchQuery.clear();
+        m_addButton->setEnabled(true);
         updateFilterButtonStyles();
         if (m_currentProductId > 0) {
             m_model->loadTasks(m_currentProductId, TaskStatus::Archived);
         }
+        m_titleLabel->setText("Tasks");
     });
     connect(m_deletedButton, &QPushButton::clicked, this, [this]() {
         m_showingArchived = false;
         m_showingDeleted = true;
+        m_showingSearchResults = false;
+        m_searchQuery.clear();
+        m_addButton->setEnabled(true);
         updateFilterButtonStyles();
         m_model->loadDeletedTasks();
+        m_titleLabel->setText("Tasks");
     });
 
     // Periodic refresh timer for live progress bar updates
@@ -136,13 +148,36 @@ void TaskPane::updateFilterButtonStyles()
         "padding: 8px; font-size: 12px; }"
         "QPushButton:hover { background-color: #4a6580; }";
 
-    bool isActive = !m_showingArchived && !m_showingDeleted;
+    const bool isSearchMode = m_showingSearchResults;
+    const bool isActive = !isSearchMode && !m_showingArchived && !m_showingDeleted;
+    const bool isArchived = !isSearchMode && m_showingArchived;
+    const bool isDeleted = !isSearchMode && m_showingDeleted;
+
     m_activeButton->setStyleSheet(isActive ? selectedStyle : unselectedStyle);
-    m_archivedButton->setStyleSheet(m_showingArchived ? selectedStyle : unselectedStyle);
-    m_deletedButton->setStyleSheet(m_showingDeleted ? selectedStyle : unselectedStyle);
+    m_archivedButton->setStyleSheet(isArchived ? selectedStyle : unselectedStyle);
+    m_deletedButton->setStyleSheet(isDeleted ? selectedStyle : unselectedStyle);
     m_activeButton->setChecked(isActive);
-    m_archivedButton->setChecked(m_showingArchived);
-    m_deletedButton->setChecked(m_showingDeleted);
+    m_archivedButton->setChecked(isArchived);
+    m_deletedButton->setChecked(isDeleted);
+}
+
+void TaskPane::refreshCurrentList()
+{
+    if (m_showingSearchResults) {
+        if (m_searchQuery.trimmed().isEmpty()) {
+            m_model->loadSearchResults({});
+        } else {
+            m_model->loadSearchResults(DatabaseManager::instance().searchTasks(m_searchQuery));
+        }
+        return;
+    }
+
+    if (m_showingDeleted) {
+        m_model->loadDeletedTasks();
+        return;
+    }
+
+    m_model->refresh();
 }
 
 void TaskPane::setupContextMenu()
@@ -173,7 +208,7 @@ void TaskPane::setupContextMenu()
             QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
             if (selected == toggleAction) {
                 DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
-                m_model->refresh();
+                refreshCurrentList();
             } else if (selected == renameAction) {
                 QString currentTitle = index.data(TaskListModel::TitleRole).toString();
                 bool ok;
@@ -181,19 +216,22 @@ void TaskPane::setupContextMenu()
                     "Title:", QLineEdit::Normal, currentTitle, &ok);
                 if (ok && !newTitle.trimmed().isEmpty()) {
                     DatabaseManager::instance().renameSubtask(subtaskId, newTitle.trimmed());
-                    m_model->refresh();
+                    refreshCurrentList();
                 }
             } else if (selected == deleteAction) {
                 DatabaseManager::instance().deleteSubtask(subtaskId);
-                m_model->refresh();
+                refreshCurrentList();
             }
             return;
         }
 
         int taskId = m_model->taskIdAt(index.row());
 
+        const QString taskStatus = index.data(TaskListModel::StatusRole).toString().trimmed().toLower();
+        const bool isDeletedTask = m_showingDeleted || taskStatus == "deleted";
+
         // Deleted tasks have a simplified context menu
-        if (m_showingDeleted) {
+        if (isDeletedTask) {
             QAction *restoreAction = menu.addAction("Restore");
             menu.addSeparator();
             QAction *permDeleteAction = menu.addAction("Permanently Delete");
@@ -201,7 +239,7 @@ void TaskPane::setupContextMenu()
             QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
             if (selected == restoreAction) {
                 DatabaseManager::instance().restoreTask(taskId);
-                m_model->loadDeletedTasks();
+                refreshCurrentList();
                 emit taskSelected(-1);
             } else if (selected == permDeleteAction) {
                 auto result = QMessageBox::warning(this, "Permanently Delete",
@@ -209,7 +247,7 @@ void TaskPane::setupContextMenu()
                     QMessageBox::Yes | QMessageBox::No);
                 if (result == QMessageBox::Yes) {
                     DatabaseManager::instance().permanentlyDeleteTask(taskId);
-                    m_model->loadDeletedTasks();
+                    refreshCurrentList();
                     emit taskSelected(-1);
                 }
             }
@@ -259,7 +297,8 @@ void TaskPane::setupContextMenu()
         QAction *addSubTaskAction = menu.addAction("Add Sub Task...");
 
         // Archive/Reactivate
-        bool isArchived = (m_model->currentStatus() == TaskStatus::Archived);
+        const bool isArchived = (taskStatus == "archived") ||
+                                (taskStatus.isEmpty() && m_model->currentStatus() == TaskStatus::Archived);
         QAction *archiveAction = nullptr;
         if (isArchived) {
             archiveAction = menu.addAction("Reactivate");
@@ -277,7 +316,7 @@ void TaskPane::setupContextMenu()
         for (int i = 0; i < priorityMenu->actions().size(); ++i) {
             if (selected == priorityMenu->actions()[i]) {
                 DatabaseManager::instance().updateTaskPriority(taskId, static_cast<TaskPriority>(i));
-                m_model->refresh();
+                refreshCurrentList();
                 return;
             }
         }
@@ -286,18 +325,18 @@ void TaskPane::setupContextMenu()
             QDateTime newDate = showDueDateDialog(currentDue);
             if (newDate.isValid()) {
                 DatabaseManager::instance().updateTaskDueDate(taskId, newDate);
-                m_model->refresh();
+                refreshCurrentList();
             }
         } else if (selected == clearDueDateAction) {
             DatabaseManager::instance().updateTaskDueDate(taskId, QDateTime());
-            m_model->refresh();
+            refreshCurrentList();
         }
 
         // Check status actions
         for (int i = 0; i < 5; ++i) {
             if (selected == statusActions[i]) {
                 DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
-                m_model->refresh();
+                refreshCurrentList();
                 return;
             }
         }
@@ -319,7 +358,7 @@ void TaskPane::setupContextMenu()
                 if (!m_model->isExpanded(taskId)) {
                     m_model->toggleExpand(taskId);
                 } else {
-                    m_model->refresh();
+                    refreshCurrentList();
                 }
             }
         }
@@ -329,18 +368,121 @@ void TaskPane::setupContextMenu()
 void TaskPane::loadTasks(int productId)
 {
     m_currentProductId = productId;
-    TaskStatus status = m_showingArchived ? TaskStatus::Archived : TaskStatus::Active;
-    m_model->loadTasks(productId, status);
+    m_showingSearchResults = false;
+    m_searchQuery.clear();
+    m_addButton->setEnabled(true);
+    if (m_showingDeleted) {
+        m_model->loadDeletedTasks();
+    } else {
+        TaskStatus status = m_showingArchived ? TaskStatus::Archived : TaskStatus::Active;
+        m_model->loadTasks(productId, status);
+    }
     m_titleLabel->setText("Tasks");
+    updateFilterButtonStyles();
 }
 
 void TaskPane::showArchived(bool archived)
 {
     m_showingArchived = archived;
+    m_showingDeleted = false;
+    m_showingSearchResults = false;
+    m_searchQuery.clear();
+    m_addButton->setEnabled(true);
     updateFilterButtonStyles();
     if (m_currentProductId > 0) {
         loadTasks(m_currentProductId);
     }
+}
+
+void TaskPane::loadSearchResults(const QList<Task> &tasks, const QString &query)
+{
+    m_showingArchived = false;
+    m_showingDeleted = false;
+    m_showingSearchResults = true;
+    m_searchQuery = query.trimmed();
+    m_addButton->setEnabled(false);
+    m_titleLabel->setText("Tasks (Search Results)");
+    updateFilterButtonStyles();
+
+    m_model->setActiveTaskId(-1);
+    m_listView->setCurrentIndex(QModelIndex());
+    m_model->loadSearchResults(tasks);
+    emit taskSelected(-1);
+}
+
+void TaskPane::restoreView(int productId, ViewMode mode, int selectedTaskId)
+{
+    m_currentProductId = productId;
+    m_showingSearchResults = false;
+    m_searchQuery.clear();
+    m_addButton->setEnabled(true);
+
+    switch (mode) {
+        case ViewMode::Active:
+            m_showingArchived = false;
+            m_showingDeleted = false;
+            if (productId > 0) {
+                m_model->loadTasks(productId, TaskStatus::Active);
+            } else {
+                m_model->loadSearchResults({});
+            }
+            break;
+        case ViewMode::Archived:
+            m_showingArchived = true;
+            m_showingDeleted = false;
+            if (productId > 0) {
+                m_model->loadTasks(productId, TaskStatus::Archived);
+            } else {
+                m_model->loadSearchResults({});
+            }
+            break;
+        case ViewMode::Deleted:
+            m_showingArchived = false;
+            m_showingDeleted = true;
+            m_model->loadDeletedTasks();
+            break;
+        case ViewMode::SearchResults:
+            m_showingArchived = false;
+            m_showingDeleted = false;
+            m_model->loadSearchResults({});
+            break;
+    }
+
+    m_titleLabel->setText("Tasks");
+    updateFilterButtonStyles();
+
+    QModelIndex restoreIndex;
+    if (selectedTaskId > 0) {
+        const int row = m_model->rowForTaskId(selectedTaskId);
+        if (row >= 0) {
+            restoreIndex = m_model->index(row);
+        }
+    }
+
+    m_model->setActiveTaskId(-1);
+    m_listView->setCurrentIndex(restoreIndex);
+    if (restoreIndex.isValid()) {
+        m_model->setActiveTaskId(selectedTaskId);
+        m_listView->scrollTo(restoreIndex);
+        m_listView->viewport()->update();
+        emit taskSelected(selectedTaskId);
+    } else {
+        emit taskSelected(-1);
+    }
+}
+
+TaskPane::ViewMode TaskPane::viewMode() const
+{
+    if (m_showingSearchResults) {
+        return ViewMode::SearchResults;
+    }
+    if (m_showingDeleted) {
+        return ViewMode::Deleted;
+    }
+    if (m_showingArchived) {
+        return ViewMode::Archived;
+    }
+    return ViewMode::Active;
 }
 
 int TaskPane::selectedTaskId() const
@@ -362,12 +504,18 @@ void TaskPane::onTaskClicked(const QModelIndex &index)
     // SubTask: check if checkbox was clicked
     if (isSubTask) {
         QRect checkRect = TaskCardDelegate::subtaskCheckboxRect(option);
+        int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
         if (checkRect.contains(clickPos)) {
-            int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
             bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
             DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
-            m_model->refresh();
+            refreshCurrentList();
+            return;
         }
+
+        // Allow selecting a sub-task row to edit its own content
+        m_model->setActiveTaskId(-1);
+        m_listView->viewport()->update();
+        emit subTaskSelected(subtaskId);
         return;
     }
 
@@ -432,7 +580,7 @@ void TaskPane::showPriorityPopup(const QModelIndex &index, const QPoint &globalP
     for (int i = 0; i < menu.actions().size(); ++i) {
         if (selected == menu.actions()[i]) {
             DatabaseManager::instance().updateTaskPriority(taskId, static_cast<TaskPriority>(i));
-            m_model->refresh();
+            refreshCurrentList();
             return;
         }
     }
@@ -470,7 +618,7 @@ void TaskPane::showWorkStatusPopup(const QModelIndex &index, const QPoint &globa
     for (int i = 0; i < menu.actions().size(); ++i) {
         if (selected == menu.actions()[i]) {
             DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
-            m_model->refresh();
+            refreshCurrentList();
             return;
         }
     }
@@ -638,7 +786,12 @@ void TaskPane::onDeleteTask()
         QMessageBox::Yes | QMessageBox::No);
 
     if (result == QMessageBox::Yes) {
-        m_model->removeTask(index.row());
+        const int taskId = m_model->taskIdAt(index.row());
+        if (taskId <= 0) {
+            return;
+        }
+        DatabaseManager::instance().deleteTask(taskId);
+        refreshCurrentList();
         emit taskSelected(-1);  // Clear editor
     }
 }
@@ -649,8 +802,9 @@ void TaskPane::onArchiveTask()
     if (!index.isValid()) return;
 
     int taskId = m_model->taskIdAt(index.row());
+    if (taskId <= 0) return;
     DatabaseManager::instance().archiveTask(taskId);
-    m_model->refresh();
+    refreshCurrentList();
     emit taskSelected(-1);
 }
 
@@ -660,8 +814,9 @@ void TaskPane::onReactivateTask()
     if (!index.isValid()) return;
 
     int taskId = m_model->taskIdAt(index.row());
+    if (taskId <= 0) return;
     DatabaseManager::instance().reactivateTask(taskId);
-    m_model->refresh();
+    refreshCurrentList();
     emit taskSelected(-1);
 }
 
@@ -673,6 +828,10 @@ void TaskPane::onChangePriority()
 void TaskPane::onStatusToggle(bool showArchived)
 {
     m_showingArchived = showArchived;
+    m_showingDeleted = false;
+    m_showingSearchResults = false;
+    m_searchQuery.clear();
+    m_addButton->setEnabled(true);
     updateFilterButtonStyles();
     if (m_currentProductId > 0) {
         TaskStatus status = m_showingArchived ? TaskStatus::Archived : TaskStatus::Active;

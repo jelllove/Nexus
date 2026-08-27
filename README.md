@@ -12,7 +12,7 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **Rich Text Editor** — TipTap-based WYSIWYG editor embedded via QWebEngineView, supporting headings, lists, code blocks, images, and more
 - **Task Cards** — Visual task cards with priority badges (P0–P3), color-coded priority bars, created/modified timestamps, and due-date progress bars with cute animal icons
 - **Due Dates & Progress** — Set due dates on tasks; a day-based progress bar shows time elapsed with green/orange/red color coding
-- **Full-Text Search** — SQLite FTS5-powered instant search across all task titles and content, with LIKE fallback
+- **Full-Text Search** — SQLite FTS5-powered global search across Active/Archived/Deleted task titles and content, rendered directly in the task list with context restore on clear
 - **Priority Management** — Click the priority badge or right-click to change task priority; tasks auto-sort by priority then due date
 - **Active / Archived Toggle** — Quick-switch between active and archived tasks with toggle buttons
 - **Product Ordering & Archive** — Drag to reorder products, archive/reactivate products, and expand archived products below the active list
@@ -22,6 +22,7 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **Image Support** — Paste or drag images into the editor; stored locally in AppData
 - **Content History** — Automatic snapshots for undo/redo support
 - **Markdown Export** — Export selected Active tasks via Product → Main Task → Sub Task selection, optional AI one-line summaries with extra confirmation, progress dialog with logs/cancel, and collapsible tree-style Markdown output without color badges
+- **Markdown Preview** — Reuse the same selection/summarization pipeline and open a non-modal preview window with `Copy Markdown`, `Copy HTML`, and `Save As .md`
 
 ## Architecture
 
@@ -31,7 +32,7 @@ src/
 ├── db/            DatabaseManager (SQLite + FTS5, WAL mode)
 ├── models/        Product & Task structs, Qt list models
 ├── ui/            ProductPane, TaskPane, TaskCardDelegate,
-│                  EditorPane, SearchBar, SettingsDialog
+│                  EditorPane, SearchBar, SettingsDialog, MarkdownPreviewDialog
 ├── editor/        EditorBridge (C++ ↔ JS via QWebChannel)
 ├── services/      AIService, ImageManager
 └── platform/      GlobalHotkey (Win32)
