@@ -3,16 +3,19 @@
 #include <QString>
 #include <QDateTime>
 #include <QList>
+#include "models/Task.h"
 
 struct ExportSubTaskItem {
     QString title;
-    bool completed = false;
+    TaskWorkStatus workStatus = TaskWorkStatus::NotStarted;
+    QString workStatusIcon;
 };
 
 struct ExportTaskItem {
     QString productName;
     QString statusText;
     QString title;
+    TaskPriority priority = TaskPriority::Medium;
     QString contentHtml;
     QDateTime updatedAt;
     QList<ExportSubTaskItem> subtasks;

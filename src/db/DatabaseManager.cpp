@@ -214,6 +214,23 @@ bool DatabaseManager::createFtsTables()
         "  INSERT INTO tasks_fts(rowid, title, content) VALUES (new.id, new.title, new.content); "
         "END");
 
+    // Keep imported or pre-existing rows searchable when FTS table is created later.
+    QSqlQuery countQuery(m_db);
+    if (countQuery.exec("SELECT (SELECT COUNT(*) FROM tasks), (SELECT COUNT(*) FROM tasks_fts)")
+        && countQuery.next()) {
+        const int taskCount = countQuery.value(0).toInt();
+        const int ftsCount = countQuery.value(1).toInt();
+        if (taskCount != ftsCount) {
+            if (!query.exec("INSERT INTO tasks_fts(tasks_fts) VALUES('rebuild')")) {
+                qWarning() << "Failed to rebuild FTS index:" << query.lastError().text();
+            } else {
+                qInfo() << "Rebuilt FTS index for" << taskCount << "task(s).";
+            }
+        }
+    } else {
+        qWarning() << "Failed to compare tasks and FTS index row counts:" << countQuery.lastError().text();
+    }
+
     return true;
 }
 
@@ -1190,9 +1207,37 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         q.addBindValue(query);
     }
 
-    if (!q.exec()) {
-        // Fallback to LIKE-based search
+    const auto appendRows = [&tasks, &q]() {
+        while (q.next()) {
+            Task t;
+            t.id = q.value(0).toInt();
+            t.productId = q.value(1).toInt();
+            t.title = q.value(2).toString();
+            t.content = q.value(3).toString();
+            t.priority = static_cast<TaskPriority>(q.value(4).toInt());
+            t.status = taskStatusFromDb(q.value(5).toString());
+            t.sortOrder = q.value(6).toInt();
+            t.createdAt = q.value(7).toDateTime();
+            t.updatedAt = q.value(8).toDateTime();
+            t.archivedAt = q.value(9).toDateTime();
+            t.dueDate = q.value(10).toDateTime();
+            t.workStatus = static_cast<TaskWorkStatus>(q.value(11).toInt());
+            tasks.append(t);
+        }
+    };
+
+    if (q.exec()) {
+        appendRows();
+        if (!tasks.isEmpty()) {
+            return tasks;
+        }
+        qInfo() << "FTS search returned no rows, using LIKE fallback for query:" << query;
+    } else {
         qWarning() << "FTS search failed, using LIKE fallback:" << q.lastError().text();
+    }
+
+    tasks.clear();
+    {
         QString likeQuery = "%" + query + "%";
         if (productId > 0) {
             q.prepare(
@@ -1210,25 +1255,13 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
             q.addBindValue(likeQuery);
             q.addBindValue(likeQuery);
         }
-        q.exec();
+        if (!q.exec()) {
+            qWarning() << "LIKE search failed:" << q.lastError().text();
+            return tasks;
+        }
     }
+    appendRows();
 
-    while (q.next()) {
-        Task t;
-        t.id = q.value(0).toInt();
-        t.productId = q.value(1).toInt();
-        t.title = q.value(2).toString();
-        t.content = q.value(3).toString();
-        t.priority = static_cast<TaskPriority>(q.value(4).toInt());
-        t.status = taskStatusFromDb(q.value(5).toString());
-        t.sortOrder = q.value(6).toInt();
-        t.createdAt = q.value(7).toDateTime();
-        t.updatedAt = q.value(8).toDateTime();
-        t.archivedAt = q.value(9).toDateTime();
-        t.dueDate = q.value(10).toDateTime();
-        t.workStatus = static_cast<TaskWorkStatus>(q.value(11).toInt());
-        tasks.append(t);
-    }
     return tasks;
 }
 

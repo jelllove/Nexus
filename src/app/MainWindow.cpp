@@ -35,6 +35,7 @@
 #include <QTimer>
 #include <QPointer>
 #include <QSignalBlocker>
+#include <QBrush>
 #include <memory>
 
 #ifdef Q_OS_WIN
@@ -752,9 +753,29 @@ bool MainWindow::promptTaskSelectionDialog(
     constexpr int RoleId = Qt::UserRole;
     constexpr int RoleProductId = Qt::UserRole + 1;
     constexpr int RoleTitle = Qt::UserRole + 2;
-    constexpr int RoleSubtaskCompleted = Qt::UserRole + 3;
+    constexpr int RoleSubtaskWorkStatus = Qt::UserRole + 3;
     constexpr int RoleWorkStatusText = Qt::UserRole + 4;
     constexpr int RoleWorkStatusIcon = Qt::UserRole + 5;
+    constexpr int RoleSubtaskWorkStatusIcon = Qt::UserRole + 6;
+
+    const auto priorityCodeFor = [](TaskPriority priority) -> QString {
+        const QString priorityText = Task::priorityToString(priority);
+        const int splitIndex = priorityText.indexOf(" - ");
+        return splitIndex > 0 ? priorityText.left(splitIndex) : priorityText;
+    };
+    const auto priorityEmojiFor = [](TaskPriority priority) -> QString {
+        switch (priority) {
+            case TaskPriority::Critical:
+                return QString::fromUtf8("🔴");
+            case TaskPriority::High:
+                return QString::fromUtf8("🟠");
+            case TaskPriority::Medium:
+                return QString::fromUtf8("🔵");
+            case TaskPriority::Low:
+                return QString::fromUtf8("⚪");
+        }
+        return QString::fromUtf8("🔵");
+    };
 
     QDialog dialog(this);
     dialog.setWindowTitle("Export Tasks - Step 2/2");
@@ -788,14 +809,19 @@ bool MainWindow::promptTaskSelectionDialog(
 
         for (const Task &task : it.value()) {
             const QString title = task.title.trimmed().isEmpty() ? "Untitled Task" : task.title;
+            const QString priorityCode = priorityCodeFor(task.priority);
+            const QString priorityBadge = QString("%1 %2").arg(priorityEmojiFor(task.priority), priorityCode);
             auto *taskItem = new QTreeWidgetItem(
-                productItem, {Task::workStatusIcon(task.workStatus) + " " + title});
+                productItem, {QString("%1 %2 %3")
+                                  .arg(Task::workStatusIcon(task.workStatus), priorityBadge, title)});
             taskItem->setData(0, RoleNodeType, MainTaskNode);
             taskItem->setData(0, RoleId, task.id);
             taskItem->setData(0, RoleProductId, productId);
             taskItem->setData(0, RoleTitle, task.title);
             taskItem->setData(0, RoleWorkStatusText, Task::workStatusToString(task.workStatus));
             taskItem->setData(0, RoleWorkStatusIcon, Task::workStatusIcon(task.workStatus));
+            taskItem->setToolTip(0, Task::priorityToString(task.priority));
+            taskItem->setBackground(0, QBrush(Task::priorityBackgroundColor(task.priority)));
             taskItem->setCheckState(0, Qt::Unchecked);
             taskItem->setFlags((taskItem->flags() | Qt::ItemIsUserCheckable) &
                                ~Qt::ItemIsSelectable);
@@ -813,14 +839,16 @@ bool MainWindow::promptTaskSelectionDialog(
                     const QString subTitle = subtask.title.trimmed().isEmpty()
                         ? QString("Untitled sub task")
                         : subtask.title;
-                    const bool subtaskCompleted = (subtask.workStatus == TaskWorkStatus::Completed);
                     auto *subtaskItem = new QTreeWidgetItem(
                         taskItem,
                         {QString("%1 %2").arg(Task::workStatusIcon(subtask.workStatus), subTitle)});
                     subtaskItem->setData(0, RoleNodeType, SubTaskNode);
                     subtaskItem->setData(0, RoleId, subtask.id);
                     subtaskItem->setData(0, RoleTitle, subtask.title);
-                    subtaskItem->setData(0, RoleSubtaskCompleted, subtaskCompleted);
+                    subtaskItem->setData(
+                        0, RoleSubtaskWorkStatus, static_cast<int>(subtask.workStatus));
+                    subtaskItem->setData(
+                        0, RoleSubtaskWorkStatusIcon, Task::workStatusIcon(subtask.workStatus));
                     subtaskItem->setCheckState(0, Qt::Unchecked);
                     subtaskItem->setFlags((subtaskItem->flags() | Qt::ItemIsUserCheckable) &
                                           ~Qt::ItemIsSelectable);
@@ -946,10 +974,16 @@ bool MainWindow::promptTaskSelectionDialog(
                 if (subtaskItem->checkState(0) != Qt::Checked) {
                     continue;
                 }
-                selectedSubtasks.append({
-                    subtaskItem->data(0, RoleTitle).toString(),
-                    subtaskItem->data(0, RoleSubtaskCompleted).toBool()
-                });
+                ExportSubTaskItem selectedSubtask;
+                selectedSubtask.title = subtaskItem->data(0, RoleTitle).toString();
+                selectedSubtask.workStatus = static_cast<TaskWorkStatus>(
+                    subtaskItem->data(0, RoleSubtaskWorkStatus).toInt());
+                selectedSubtask.workStatusIcon =
+                    subtaskItem->data(0, RoleSubtaskWorkStatusIcon).toString().trimmed();
+                if (selectedSubtask.workStatusIcon.isEmpty()) {
+                    selectedSubtask.workStatusIcon = Task::workStatusIcon(selectedSubtask.workStatus);
+                }
+                selectedSubtasks.append(selectedSubtask);
             }
 
             const bool shouldExportTask = (taskState == Qt::Checked ||
@@ -969,6 +1003,7 @@ bool MainWindow::promptTaskSelectionDialog(
                 exportItem.productName = productNames.value(productId);
                 exportItem.statusText = "Active";
                 exportItem.title = task.title;
+                exportItem.priority = task.priority;
                 exportItem.contentHtml = task.content;
                 exportItem.updatedAt = task.updatedAt;
                 exportItem.workStatusText = taskItem->data(0, RoleWorkStatusText).toString();

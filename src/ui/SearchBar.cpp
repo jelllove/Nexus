@@ -22,8 +22,20 @@ SearchBar::SearchBar(QWidget *parent)
     m_clearButton->setVisible(false);
     layout->addWidget(m_clearButton);
 
+    m_searchDebounceTimer = new QTimer(this);
+    m_searchDebounceTimer->setSingleShot(true);
+    m_searchDebounceTimer->setInterval(250);
+    connect(m_searchDebounceTimer, &QTimer::timeout, this, [this]() {
+        const QString text = m_searchInput->text().trimmed();
+        if (!text.isEmpty()) {
+            m_clearButton->setVisible(true);
+            emit searchRequested(text);
+        }
+    });
+
     connect(m_searchInput, &QLineEdit::returnPressed, this, [this]() {
-        QString text = m_searchInput->text().trimmed();
+        m_searchDebounceTimer->stop();
+        const QString text = m_searchInput->text().trimmed();
         if (!text.isEmpty()) {
             m_clearButton->setVisible(true);
             emit searchRequested(text);
@@ -31,16 +43,23 @@ SearchBar::SearchBar(QWidget *parent)
     });
 
     connect(m_clearButton, &QPushButton::clicked, this, [this]() {
+        m_searchDebounceTimer->stop();
         m_searchInput->clear();
         m_clearButton->setVisible(false);
         emit searchCleared();
     });
 
     connect(m_searchInput, &QLineEdit::textChanged, this, [this](const QString &text) {
-        if (text.isEmpty()) {
+        const QString trimmed = text.trimmed();
+        if (trimmed.isEmpty()) {
+            m_searchDebounceTimer->stop();
             m_clearButton->setVisible(false);
             emit searchCleared();
+            return;
         }
+
+        m_clearButton->setVisible(true);
+        m_searchDebounceTimer->start();
     });
 }
 

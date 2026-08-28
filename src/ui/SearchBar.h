@@ -4,6 +4,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QHBoxLayout>
+#include <QTimer>
 
 class SearchBar : public QWidget
 {
@@ -22,4 +23,5 @@ signals:
 private:
     QLineEdit *m_searchInput;
     QPushButton *m_clearButton;
+    QTimer *m_searchDebounceTimer;
 };
