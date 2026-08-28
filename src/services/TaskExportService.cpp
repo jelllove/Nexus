@@ -64,9 +64,7 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
 
     for (auto it = groupedProducts.cbegin(); it != groupedProducts.cend(); ++it) {
         const QString productName = it.key();
-
-        stream << "<details open>\n";
-        stream << "<summary>📚 " << productName.toHtmlEscaped() << "</summary>\n\n";
+        stream << "## 📚 " << productName << "\n\n";
 
         for (const ExportTaskItem &item : it.value()) {
             const QString taskTitle = normalizeHeading(item.title, "📝 Untitled Task");
@@ -77,41 +75,32 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
                 ? QString::fromUtf8("⏯️")
                 : item.workStatusIcon.trimmed();
 
-            stream << "<details>\n";
-            stream << "<summary>" << (workStatusIcon + " " + taskTitle).toHtmlEscaped() << "</summary>\n\n";
-            stream << "- **Status:** " << (workStatusIcon + " " + workStatusText).toHtmlEscaped() << "\n\n";
+            stream << "- " << workStatusIcon << " **" << taskTitle << "**\n";
+            stream << "  - **Status:** " << workStatusIcon << " " << workStatusText << "\n";
 
             if (!item.simpleDescription.trimmed().isEmpty()) {
-                stream << "> 🧠 **AI Summary**\n";
-                stream << ">\n";
-                stream << "> ✨ " << item.simpleDescription.trimmed() << "\n\n";
+                stream << "  - 🧠 **AI Summary:** " << item.simpleDescription.trimmed() << "\n";
             }
 
             const QString previewText = fallbackSimpleDescription(item.contentHtml, 240);
             if (!previewText.trimmed().isEmpty()) {
-                stream << "<details>\n";
-                stream << "<summary>📝 Content Preview</summary>\n\n";
-                stream << previewText << "\n\n";
-                stream << "</details>\n\n";
+                stream << "  - 📝 **Content Preview:** " << previewText << "\n";
             }
 
             if (item.subtasks.isEmpty()) {
-                stream << "- 💤 No sub tasks\n\n";
+                stream << "  - 💤 **Sub Tasks:** _(none)_\n";
             } else {
-                stream << "#### 🪜 Selected Sub Tasks\n\n";
+                stream << "  - 🪜 **Selected Sub Tasks:**\n";
                 for (const ExportSubTaskItem &subtask : item.subtasks) {
                     const QString subTitle = normalizeHeading(subtask.title, "Untitled sub task");
-                    stream << "- [" << (subtask.completed ? "x" : " ") << "] "
+                    stream << "    - [" << (subtask.completed ? "x" : " ") << "] "
                            << (subtask.completed ? "✅ " : "⬜ ")
                            << subTitle << "\n";
                 }
-                stream << "\n";
             }
 
-            stream << "</details>\n\n";
+            stream << "\n";
         }
-
-        stream << "</details>\n\n";
     }
 
     return markdown;

@@ -41,6 +41,10 @@
 #include <windows.h>
 #endif
 
+#ifndef APP_GIT_COMMIT
+#define APP_GIT_COMMIT "unknown"
+#endif
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
@@ -60,10 +64,17 @@ MainWindow::MainWindow(QWidget *parent)
     connect(&AIService::instance(), &AIService::error,
             this, &MainWindow::onAIError);
 
-    setWindowTitle("Nexus - Task Manager");
+    const QString buildCommit = QString::fromUtf8(APP_GIT_COMMIT);
+    setWindowTitle(
+        QString("Nexus - Task Manager (v%1 · %2)")
+            .arg(qApp->applicationVersion(),
+                 buildCommit.isEmpty() ? QStringLiteral("unknown") : buildCommit));
     resize(1400, 800);
 
-    statusBar()->showMessage("Ready");
+    statusBar()->showMessage(
+        QString("Ready · v%1 · %2")
+            .arg(qApp->applicationVersion(),
+                 buildCommit.isEmpty() ? QStringLiteral("unknown") : buildCommit));
 
     // Check for updates
     checkForUpdates();
@@ -172,9 +183,13 @@ void MainWindow::setupMenuBar()
         aboutBox.setWindowTitle("About Nexus");
         aboutBox.setIconPixmap(QPixmap(":/icons/app-icon.png").scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
         aboutBox.setTextFormat(Qt::RichText);
+        const QString buildCommit = QString::fromUtf8(APP_GIT_COMMIT).trimmed().isEmpty()
+            ? QStringLiteral("unknown")
+            : QString::fromUtf8(APP_GIT_COMMIT).trimmed();
         aboutBox.setText(
             QString("<h2>Nexus v%1</h2>").arg(qApp->applicationVersion()) +
-            "<p>Personal Task Management</p>"
+            "<p>Personal Task Management</p>" +
+            QString("<p><b>Build Commit:</b> <code>%1</code></p>").arg(buildCommit.toHtmlEscaped()) +
             "<p>"
             "<b>GitHub:</b> <a href=\"https://github.com/jelllove/Nexus\">github.com/jelllove/Nexus</a><br>"
             "<b>Website:</b> <a href=\"https://www.jelllove.com\">www.jelllove.com</a><br>"
@@ -813,8 +828,23 @@ bool MainWindow::promptTaskSelectionDialog(
             }
         }
     }
+    tree->setUniformRowHeights(false);
     tree->expandAll();
-    tree->setUniformRowHeights(true);
+    QTimer::singleShot(0, tree, [tree]() {
+        tree->expandAll();
+        tree->viewport()->update();
+    });
+
+    const auto setChildrenCheckState = [](QTreeWidgetItem *node, Qt::CheckState state, const auto &self) -> void {
+        for (int i = 0; i < node->childCount(); ++i) {
+            QTreeWidgetItem *child = node->child(i);
+            if (child->isDisabled()) {
+                continue;
+            }
+            child->setCheckState(0, state);
+            self(child, state, self);
+        }
+    };
 
     bool syncingCheckState = false;
     connect(tree, &QTreeWidget::itemChanged, tree,
@@ -827,21 +857,21 @@ bool MainWindow::promptTaskSelectionDialog(
                 syncingCheckState = true;
                 const Qt::CheckState state = item->checkState(0);
                 if (state != Qt::PartiallyChecked) {
-                    for (int i = 0; i < item->childCount(); ++i) {
-                        QTreeWidgetItem *child = item->child(i);
-                        if (!child->isDisabled()) {
-                            child->setCheckState(0, state);
-                        }
-                    }
+                    setChildrenCheckState(item, state, setChildrenCheckState);
                 }
 
                 QTreeWidgetItem *parent = item->parent();
                 while (parent) {
                     int checkedChildren = 0;
                     int partialChildren = 0;
-                    const int childCount = parent->childCount();
-                    for (int i = 0; i < childCount; ++i) {
-                        const Qt::CheckState childState = parent->child(i)->checkState(0);
+                    int effectiveChildCount = 0;
+                    for (int i = 0; i < parent->childCount(); ++i) {
+                        QTreeWidgetItem *child = parent->child(i);
+                        if (child->isDisabled()) {
+                            continue;
+                        }
+                        ++effectiveChildCount;
+                        const Qt::CheckState childState = child->checkState(0);
                         if (childState == Qt::Checked) {
                             checkedChildren++;
                         } else if (childState == Qt::PartiallyChecked) {
@@ -849,7 +879,9 @@ bool MainWindow::promptTaskSelectionDialog(
                         }
                     }
 
-                    if (checkedChildren == childCount) {
+                    if (effectiveChildCount == 0) {
+                        parent->setCheckState(0, Qt::Unchecked);
+                    } else if (checkedChildren == effectiveChildCount) {
                         parent->setCheckState(0, Qt::Checked);
                     } else if (checkedChildren == 0 && partialChildren == 0) {
                         parent->setCheckState(0, Qt::Unchecked);
@@ -873,11 +905,13 @@ bool MainWindow::promptTaskSelectionDialog(
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
             tree->topLevelItem(i)->setCheckState(0, Qt::Checked);
         }
+        tree->viewport()->update();
     });
     connect(clearAllBtn, &QPushButton::clicked, tree, [tree]() {
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
             tree->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
         }
+        tree->viewport()->update();
     });
 
     auto *buttons = new QDialogButtonBox(
