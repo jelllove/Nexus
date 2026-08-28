@@ -21,5 +21,5 @@ public:
                                     const QModelIndex &index);
     static QRect expandIconRect(const QStyleOptionViewItem &option,
                                 const QModelIndex &index);
-    static QRect subtaskCheckboxRect(const QStyleOptionViewItem &option);
+    static QRect subtaskStatusIconRect(const QStyleOptionViewItem &option);
 };

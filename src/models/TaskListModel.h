@@ -33,6 +33,8 @@ public:
         WorkStatusIconRole,
         IsSubTaskRole,
         SubTaskCompletedRole,
+        SubTaskWorkStatusRole,
+        SubTaskWorkStatusIconRole,
         SubTaskIdRole,
         ParentTaskIdRole,
         HasSubTasksRole,

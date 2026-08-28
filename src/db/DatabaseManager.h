@@ -57,6 +57,7 @@ public:
     QList<SubTask> getSubtasks(int taskId);
     int getSubtaskCount(int taskId);
     int addSubtask(int taskId, const QString &title);
+    bool updateSubtaskWorkStatus(int subtaskId, TaskWorkStatus workStatus);
     bool updateSubtaskContent(int subtaskId, const QString &content);
     bool toggleSubtask(int subtaskId, bool completed);
     bool deleteSubtask(int subtaskId);

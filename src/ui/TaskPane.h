@@ -51,6 +51,7 @@ private:
     void refreshCurrentList();
     void showPriorityPopup(const QModelIndex &index, const QPoint &globalPos);
     void showWorkStatusPopup(const QModelIndex &index, const QPoint &globalPos);
+    void showSubTaskStatusPopup(int subtaskId, int currentStatus, const QPoint &globalPos);
     void handleDropReorder(int fromRow, int toRow);
     QDateTime showDueDateDialog(const QDateTime &current = QDateTime());
 

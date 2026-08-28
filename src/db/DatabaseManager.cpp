@@ -35,6 +35,25 @@ TaskStatus taskStatusFromDb(const QString &value)
     return TaskStatus::Active;
 }
 
+TaskWorkStatus taskWorkStatusFromDb(int value)
+{
+    switch (value) {
+        case 0:
+            return TaskWorkStatus::NotStarted;
+        case 1:
+            return TaskWorkStatus::Ongoing;
+        case 2:
+            return TaskWorkStatus::Paused;
+        case 3:
+            return TaskWorkStatus::Completed;
+        case 4:
+            return TaskWorkStatus::Waiting;
+        default:
+            break;
+    }
+    return TaskWorkStatus::NotStarted;
+}
+
 bool queryProductStatusColumns(QSqlDatabase &db, bool &hasStatus, bool &hasArchivedAt)
 {
     hasStatus = false;
@@ -307,6 +326,7 @@ bool DatabaseManager::migrateDatabase()
             "  title TEXT NOT NULL DEFAULT '',"
             "  content TEXT DEFAULT '',"
             "  completed INTEGER DEFAULT 0,"
+            "  work_status INTEGER DEFAULT 0,"
             "  sort_order INTEGER DEFAULT 0,"
             "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
             "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
@@ -366,6 +386,7 @@ bool DatabaseManager::migrateDatabase()
                 "  title TEXT NOT NULL DEFAULT '',"
                 "  content TEXT DEFAULT '',"
                 "  completed INTEGER DEFAULT 0,"
+                "  work_status INTEGER DEFAULT 0,"
                 "  sort_order INTEGER DEFAULT 0,"
                 "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
@@ -404,6 +425,38 @@ bool DatabaseManager::migrateDatabase()
         setSetting("db_version", "8");
         dbVersion = 8;
         qInfo() << "Migration v8: ensured subtasks content and updated_at";
+    }
+
+    // Migration v8 -> v9: add subtasks.work_status and backfill from completed
+    if (dbVersion < 9) {
+        query.exec("PRAGMA table_info(subtasks)");
+        bool hasWorkStatus = false;
+        while (query.next()) {
+            const QString col = query.value(1).toString();
+            if (col == "work_status") {
+                hasWorkStatus = true;
+                break;
+            }
+        }
+
+        if (!hasWorkStatus) {
+            if (!query.exec("ALTER TABLE subtasks ADD COLUMN work_status INTEGER DEFAULT 0")) {
+                qWarning() << "Failed to add subtasks.work_status column:" << query.lastError().text();
+                return false;
+            }
+
+            if (!query.exec(
+                    "UPDATE subtasks SET work_status = CASE "
+                    "WHEN completed = 1 THEN 3 "
+                    "ELSE 0 END")) {
+                qWarning() << "Failed to backfill subtasks.work_status column:" << query.lastError().text();
+                return false;
+            }
+        }
+
+        setSetting("db_version", "9");
+        dbVersion = 9;
+        qInfo() << "Migration v9: ensured subtasks work_status and backfilled from completed";
     }
 
     return true;
@@ -955,7 +1008,7 @@ SubTask DatabaseManager::getSubtask(int subtaskId)
 {
     SubTask st;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, task_id, title, content, completed, sort_order, created_at, updated_at "
+    query.prepare("SELECT id, task_id, title, content, completed, work_status, sort_order, created_at, updated_at "
                   "FROM subtasks WHERE id = ?");
     query.addBindValue(subtaskId);
     if (query.exec() && query.next()) {
@@ -963,10 +1016,11 @@ SubTask DatabaseManager::getSubtask(int subtaskId)
         st.taskId = query.value(1).toInt();
         st.title = query.value(2).toString();
         st.content = query.value(3).toString();
-        st.completed = query.value(4).toBool();
-        st.sortOrder = query.value(5).toInt();
-        st.createdAt = query.value(6).toDateTime();
-        st.updatedAt = query.value(7).toDateTime();
+        st.workStatus = taskWorkStatusFromDb(query.value(5).toInt());
+        st.completed = (st.workStatus == TaskWorkStatus::Completed);
+        st.sortOrder = query.value(6).toInt();
+        st.createdAt = query.value(7).toDateTime();
+        st.updatedAt = query.value(8).toDateTime();
     }
     return st;
 }
@@ -975,7 +1029,7 @@ QList<SubTask> DatabaseManager::getSubtasks(int taskId)
 {
     QList<SubTask> subtasks;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, task_id, title, content, completed, sort_order, created_at, updated_at FROM subtasks "
+    query.prepare("SELECT id, task_id, title, content, completed, work_status, sort_order, created_at, updated_at FROM subtasks "
                   "WHERE task_id = ? ORDER BY sort_order ASC, id ASC");
     query.addBindValue(taskId);
     query.exec();
@@ -985,10 +1039,11 @@ QList<SubTask> DatabaseManager::getSubtasks(int taskId)
         st.taskId = query.value(1).toInt();
         st.title = query.value(2).toString();
         st.content = query.value(3).toString();
-        st.completed = query.value(4).toBool();
-        st.sortOrder = query.value(5).toInt();
-        st.createdAt = query.value(6).toDateTime();
-        st.updatedAt = query.value(7).toDateTime();
+        st.workStatus = taskWorkStatusFromDb(query.value(5).toInt());
+        st.completed = (st.workStatus == TaskWorkStatus::Completed);
+        st.sortOrder = query.value(6).toInt();
+        st.createdAt = query.value(7).toDateTime();
+        st.updatedAt = query.value(8).toDateTime();
         subtasks.append(st);
     }
     return subtasks;
@@ -1008,10 +1063,11 @@ int DatabaseManager::getSubtaskCount(int taskId)
 int DatabaseManager::addSubtask(int taskId, const QString &title)
 {
     QSqlQuery query(m_db);
-    query.prepare("INSERT INTO subtasks (task_id, title, sort_order, updated_at) "
-                  "VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?), CURRENT_TIMESTAMP)");
+    query.prepare("INSERT INTO subtasks (task_id, title, completed, work_status, sort_order, updated_at) "
+                  "VALUES (?, ?, 0, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?), CURRENT_TIMESTAMP)");
     query.addBindValue(taskId);
     query.addBindValue(title);
+    query.addBindValue(static_cast<int>(TaskWorkStatus::NotStarted));
     query.addBindValue(taskId);
     if (query.exec()) {
         return query.lastInsertId().toInt();
@@ -1019,13 +1075,21 @@ int DatabaseManager::addSubtask(int taskId, const QString &title)
     return -1;
 }
 
-bool DatabaseManager::toggleSubtask(int subtaskId, bool completed)
+bool DatabaseManager::updateSubtaskWorkStatus(int subtaskId, TaskWorkStatus workStatus)
 {
     QSqlQuery query(m_db);
-    query.prepare("UPDATE subtasks SET completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    query.addBindValue(completed ? 1 : 0);
+    query.prepare("UPDATE subtasks SET work_status = ?, completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(static_cast<int>(workStatus));
+    query.addBindValue(workStatus == TaskWorkStatus::Completed ? 1 : 0);
     query.addBindValue(subtaskId);
     return query.exec();
+}
+
+bool DatabaseManager::toggleSubtask(int subtaskId, bool completed)
+{
+    return updateSubtaskWorkStatus(
+        subtaskId,
+        completed ? TaskWorkStatus::Completed : TaskWorkStatus::NotStarted);
 }
 
 bool DatabaseManager::updateSubtaskContent(int subtaskId, const QString &content)

@@ -27,7 +27,11 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
             case IsSubTaskRole:
                 return true;
             case SubTaskCompletedRole:
-                return row.subtask.completed;
+                return row.subtask.workStatus == TaskWorkStatus::Completed;
+            case SubTaskWorkStatusRole:
+                return static_cast<int>(row.subtask.workStatus);
+            case SubTaskWorkStatusIconRole:
+                return Task::workStatusIcon(row.subtask.workStatus);
             case SubTaskIdRole:
                 return row.subtask.id;
             case ParentTaskIdRole:

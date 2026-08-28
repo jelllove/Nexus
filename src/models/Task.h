@@ -31,6 +31,7 @@ struct SubTask {
     QString title;
     QString content;
     bool completed = false;
+    TaskWorkStatus workStatus = TaskWorkStatus::NotStarted;
     int sortOrder = 0;
     QDateTime createdAt;
     QDateTime updatedAt;

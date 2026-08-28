@@ -198,18 +198,40 @@ void TaskPane::setupContextMenu()
         bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
         if (isSubTask) {
             int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
-            bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
+            int currentStatus = index.data(TaskListModel::SubTaskWorkStatusRole).toInt();
 
-            QAction *toggleAction = menu.addAction(completed ? "Mark Incomplete" : "Mark Complete");
+            QMenu *statusMenu = menu.addMenu("Set Status");
+            statusMenu->setStyleSheet(menu.styleSheet());
+            QAction *statusActions[5];
+            const char *statusLabels[] = {
+                "\xE2\x8F\xAF\xEF\xB8\x8F Not Started",
+                "\xF0\x9F\x8F\x83 Ongoing",
+                "\xE2\x8F\xB8\xEF\xB8\x8F Paused",
+                "\xE2\x9C\x85 Completed",
+                "\xE2\x8F\xB3 Waiting"
+            };
+            for (int i = 0; i < 5; ++i) {
+                statusActions[i] = statusMenu->addAction(QString::fromUtf8(statusLabels[i]));
+                if (i == currentStatus) {
+                    statusActions[i]->setEnabled(false);
+                }
+            }
+
             QAction *renameAction = menu.addAction("Rename");
             menu.addSeparator();
             QAction *deleteAction = menu.addAction("Delete");
 
             QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
-            if (selected == toggleAction) {
-                DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
-                refreshCurrentList();
-            } else if (selected == renameAction) {
+            for (int i = 0; i < 5; ++i) {
+                if (selected == statusActions[i]) {
+                    DatabaseManager::instance().updateSubtaskWorkStatus(
+                        subtaskId, static_cast<TaskWorkStatus>(i));
+                    refreshCurrentList();
+                    return;
+                }
+            }
+
+            if (selected == renameAction) {
                 QString currentTitle = index.data(TaskListModel::TitleRole).toString();
                 bool ok;
                 QString newTitle = QInputDialog::getText(this, "Rename Sub Task",
@@ -501,14 +523,13 @@ void TaskPane::onTaskClicked(const QModelIndex &index)
 
     bool isSubTask = index.data(TaskListModel::IsSubTaskRole).toBool();
 
-    // SubTask: check if checkbox was clicked
+    // SubTask: click icon to change status, click row body to open editor
     if (isSubTask) {
-        QRect checkRect = TaskCardDelegate::subtaskCheckboxRect(option);
+        QRect statusRect = TaskCardDelegate::subtaskStatusIconRect(option);
         int subtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
-        if (checkRect.contains(clickPos)) {
-            bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
-            DatabaseManager::instance().toggleSubtask(subtaskId, !completed);
-            refreshCurrentList();
+        int currentStatus = index.data(TaskListModel::SubTaskWorkStatusRole).toInt();
+        if (statusRect.contains(clickPos)) {
+            showSubTaskStatusPopup(subtaskId, currentStatus, QCursor::pos());
             return;
         }
 
@@ -618,6 +639,42 @@ void TaskPane::showWorkStatusPopup(const QModelIndex &index, const QPoint &globa
     for (int i = 0; i < menu.actions().size(); ++i) {
         if (selected == menu.actions()[i]) {
             DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
+            refreshCurrentList();
+            return;
+        }
+    }
+}
+
+void TaskPane::showSubTaskStatusPopup(int subtaskId, int currentStatus, const QPoint &globalPos)
+{
+    QMenu menu(this);
+    menu.setStyleSheet(
+        "QMenu { background-color: #2c3e50; color: white; border: 1px solid #3d566e; }"
+        "QMenu::item:selected { background-color: #2980b9; }"
+        "QMenu::item:disabled { color: #7f8c8d; }");
+
+    const char *labels[] = {
+        "\xE2\x8F\xAF\xEF\xB8\x8F Not Started",
+        "\xF0\x9F\x8F\x83 Ongoing",
+        "\xE2\x8F\xB8\xEF\xB8\x8F Paused",
+        "\xE2\x9C\x85 Completed",
+        "\xE2\x8F\xB3 Waiting"
+    };
+
+    for (int i = 0; i < 5; ++i) {
+        QAction *action = menu.addAction(QString::fromUtf8(labels[i]));
+        if (i == currentStatus) {
+            action->setEnabled(false);
+        }
+    }
+
+    QAction *selected = menu.exec(globalPos);
+    if (!selected) return;
+
+    for (int i = 0; i < menu.actions().size(); ++i) {
+        if (selected == menu.actions()[i]) {
+            DatabaseManager::instance().updateSubtaskWorkStatus(
+                subtaskId, static_cast<TaskWorkStatus>(i));
             refreshCurrentList();
             return;
         }

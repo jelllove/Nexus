@@ -63,10 +63,10 @@ QRect TaskCardDelegate::expandIconRect(const QStyleOptionViewItem &option,
     return QRect(rect.left() - 17, rect.top() + rect.height() / 2 - 8, 16, 16);
 }
 
-QRect TaskCardDelegate::subtaskCheckboxRect(const QStyleOptionViewItem &option)
+QRect TaskCardDelegate::subtaskStatusIconRect(const QStyleOptionViewItem &option)
 {
     QRect rect = option.rect.adjusted(4, 1, -4, -1);
-    return QRect(rect.left() + 30, rect.top() + 6, 18, 18);
+    return QRect(rect.left() + 30, rect.top() + 5, 20, 20);
 }
 
 // Draw status icon (left side, no background)
@@ -98,6 +98,8 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
     if (isSubTask) {
         QRect rect = option.rect.adjusted(4, 1, -4, -1);
         bool completed = index.data(TaskListModel::SubTaskCompletedRole).toBool();
+        TaskWorkStatus subtaskStatus = static_cast<TaskWorkStatus>(
+            index.data(TaskListModel::SubTaskWorkStatusRole).toInt());
 
         // Background
         if (option.state & QStyle::State_Selected) {
@@ -108,19 +110,12 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
             painter->fillRect(rect, completed ? QColor("#f8f9f9") : QColor("#ffffff"));
         }
 
-        // Indent + checkbox
-        int indent = 30;
-        QRect checkRect(rect.left() + indent, rect.top() + 6, 18, 18);
-        painter->setPen(QPen(completed ? QColor("#27ae60") : QColor("#95a5a6"), 1.5));
-        painter->setBrush(completed ? QColor("#27ae60") : Qt::NoBrush);
-        painter->drawRoundedRect(checkRect, 3, 3);
-        if (completed) {
-            painter->setPen(QPen(Qt::white, 2));
-            painter->drawLine(checkRect.left() + 4, checkRect.center().y(),
-                              checkRect.center().x(), checkRect.bottom() - 4);
-            painter->drawLine(checkRect.center().x(), checkRect.bottom() - 4,
-                              checkRect.right() - 3, checkRect.top() + 4);
-        }
+        QRect statusRect = subtaskStatusIconRect(option);
+        QFont statusFont = option.font;
+        statusFont.setPointSize(9);
+        painter->setFont(statusFont);
+        painter->setPen(completed ? QColor("#27ae60") : QColor("#2c3e50"));
+        painter->drawText(statusRect, Qt::AlignCenter, Task::workStatusIcon(subtaskStatus));
 
         // Title
         QString title = index.data(TaskListModel::TitleRole).toString();
@@ -128,7 +123,7 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
         titleFont.setPointSize(10);
         painter->setFont(titleFont);
         painter->setPen(completed ? QColor("#b0b8bc") : QColor("#2c3e50"));
-        QRect titleRect(checkRect.right() + 8, rect.top() + 4, rect.width() - indent - 34, 22);
+        QRect titleRect(statusRect.right() + 8, rect.top() + 4, rect.width() - 66, 22);
         painter->drawText(titleRect, Qt::AlignLeft | Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(title, Qt::ElideRight, titleRect.width()));
 

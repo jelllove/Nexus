@@ -798,13 +798,14 @@ bool MainWindow::promptTaskSelectionDialog(
                     const QString subTitle = subtask.title.trimmed().isEmpty()
                         ? QString("Untitled sub task")
                         : subtask.title;
+                    const bool subtaskCompleted = (subtask.workStatus == TaskWorkStatus::Completed);
                     auto *subtaskItem = new QTreeWidgetItem(
                         taskItem,
-                        {QString("%1 %2").arg(subtask.completed ? "✅" : "⬜", subTitle)});
+                        {QString("%1 %2").arg(Task::workStatusIcon(subtask.workStatus), subTitle)});
                     subtaskItem->setData(0, RoleNodeType, SubTaskNode);
                     subtaskItem->setData(0, RoleId, subtask.id);
                     subtaskItem->setData(0, RoleTitle, subtask.title);
-                    subtaskItem->setData(0, RoleSubtaskCompleted, subtask.completed);
+                    subtaskItem->setData(0, RoleSubtaskCompleted, subtaskCompleted);
                     subtaskItem->setCheckState(0, Qt::Unchecked);
                     subtaskItem->setFlags((subtaskItem->flags() | Qt::ItemIsUserCheckable) &
                                           ~Qt::ItemIsSelectable);
