@@ -69,14 +69,13 @@ QString mainTaskPriorityTitleHtml(TaskPriority priority,
     return QString(
                "<span style=\"display:inline-block; background-color:%1; color:#2c3e50; "
                "padding:2px 8px; border-radius:6px;\">"
-               "<span style=\"color:%2;\"><strong>%3 %4</strong></span> %5 %6"
+               "%3 %4 <span style=\"color:%2;\"><strong>[%5]</strong></span>"
                "</span>")
         .arg(bgColor.name(QColor::HexRgb),
              accentColor.name(QColor::HexRgb),
-             priorityEmoji(priority),
-             priorityCode(priority),
              safeWorkIcon,
-             safeTitle);
+             safeTitle,
+             priorityCode(priority));
 }
 
 QString subtaskStatusIcon(const ExportSubTaskItem &subtask)
@@ -135,7 +134,13 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
         groupedProducts[productKey].append(item);
     }
 
+    bool hasPrintedProduct = false;
     for (auto it = groupedProducts.cbegin(); it != groupedProducts.cend(); ++it) {
+        if (hasPrintedProduct) {
+            stream << "\n\n\n---\n---\n\n\n";
+        }
+        hasPrintedProduct = true;
+
         const QString productName = it.key();
         stream << "## 📚 " << productName << "\n\n";
 
@@ -189,9 +194,7 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
                     stream << "  - 📝 **Content Preview:** " << previewText << "\n";
                 }
 
-                if (item.subtasks.isEmpty()) {
-                    stream << "  - 💤 **Sub Tasks:** _(none)_\n";
-                } else {
+                if (!item.subtasks.isEmpty()) {
                     stream << "  - 🪜 **Selected Sub Tasks:**\n";
                     for (const ExportSubTaskItem &subtask : item.subtasks) {
                         const QString subTitle = normalizeHeading(subtask.title, "Untitled sub task");

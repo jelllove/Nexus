@@ -745,8 +745,7 @@ bool MainWindow::promptTaskSelectionDialog(
     enum NodeType {
         ProductNode = 1,
         MainTaskNode = 2,
-        SubTaskNode = 3,
-        EmptySubTaskPlaceholderNode = 4
+        SubTaskNode = 3
     };
 
     constexpr int RoleNodeType = Qt::UserRole + 20;
@@ -763,28 +762,13 @@ bool MainWindow::promptTaskSelectionDialog(
         const int splitIndex = priorityText.indexOf(" - ");
         return splitIndex > 0 ? priorityText.left(splitIndex) : priorityText;
     };
-    const auto priorityEmojiFor = [](TaskPriority priority) -> QString {
-        switch (priority) {
-            case TaskPriority::Critical:
-                return QString::fromUtf8("🔴");
-            case TaskPriority::High:
-                return QString::fromUtf8("🟠");
-            case TaskPriority::Medium:
-                return QString::fromUtf8("🔵");
-            case TaskPriority::Low:
-                return QString::fromUtf8("⚪");
-        }
-        return QString::fromUtf8("🔵");
-    };
-
     QDialog dialog(this);
     dialog.setWindowTitle("Export Tasks - Step 2/2");
     dialog.setMinimumSize(640, 500);
 
     auto *layout = new QVBoxLayout(&dialog);
     auto *hint = new QLabel(
-        "Select what to export in a Product → Main Task → Sub Task tree.\n"
-        "Main tasks without subtasks show a disabled 🫥 (No Sub Task) placeholder.",
+        "Select what to export in a Product → Main Task → Sub Task tree.",
         &dialog);
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -810,10 +794,10 @@ bool MainWindow::promptTaskSelectionDialog(
         for (const Task &task : it.value()) {
             const QString title = task.title.trimmed().isEmpty() ? "Untitled Task" : task.title;
             const QString priorityCode = priorityCodeFor(task.priority);
-            const QString priorityBadge = QString("%1 %2").arg(priorityEmojiFor(task.priority), priorityCode);
+            const QString priorityBadge = QString("[%1]").arg(priorityCode);
             auto *taskItem = new QTreeWidgetItem(
                 productItem, {QString("%1 %2 %3")
-                                  .arg(Task::workStatusIcon(task.workStatus), priorityBadge, title)});
+                                  .arg(Task::workStatusIcon(task.workStatus), title, priorityBadge)});
             taskItem->setData(0, RoleNodeType, MainTaskNode);
             taskItem->setData(0, RoleId, task.id);
             taskItem->setData(0, RoleProductId, productId);
@@ -827,32 +811,23 @@ bool MainWindow::promptTaskSelectionDialog(
                                ~Qt::ItemIsSelectable);
 
             const QList<SubTask> subtasks = DatabaseManager::instance().getSubtasks(task.id);
-            if (subtasks.isEmpty()) {
-                auto *placeholder = new QTreeWidgetItem(
-                    taskItem, {QString::fromUtf8("🫥 (No Sub Task)")});
-                placeholder->setFlags((placeholder->flags() & ~Qt::ItemIsUserCheckable) &
+            for (const SubTask &subtask : subtasks) {
+                const QString subTitle = subtask.title.trimmed().isEmpty()
+                    ? QString("Untitled sub task")
+                    : subtask.title;
+                auto *subtaskItem = new QTreeWidgetItem(
+                    taskItem,
+                    {QString("%1 %2").arg(Task::workStatusIcon(subtask.workStatus), subTitle)});
+                subtaskItem->setData(0, RoleNodeType, SubTaskNode);
+                subtaskItem->setData(0, RoleId, subtask.id);
+                subtaskItem->setData(0, RoleTitle, subtask.title);
+                subtaskItem->setData(
+                    0, RoleSubtaskWorkStatus, static_cast<int>(subtask.workStatus));
+                subtaskItem->setData(
+                    0, RoleSubtaskWorkStatusIcon, Task::workStatusIcon(subtask.workStatus));
+                subtaskItem->setCheckState(0, Qt::Unchecked);
+                subtaskItem->setFlags((subtaskItem->flags() | Qt::ItemIsUserCheckable) &
                                       ~Qt::ItemIsSelectable);
-                placeholder->setData(0, RoleNodeType, EmptySubTaskPlaceholderNode);
-                placeholder->setDisabled(true);
-            } else {
-                for (const SubTask &subtask : subtasks) {
-                    const QString subTitle = subtask.title.trimmed().isEmpty()
-                        ? QString("Untitled sub task")
-                        : subtask.title;
-                    auto *subtaskItem = new QTreeWidgetItem(
-                        taskItem,
-                        {QString("%1 %2").arg(Task::workStatusIcon(subtask.workStatus), subTitle)});
-                    subtaskItem->setData(0, RoleNodeType, SubTaskNode);
-                    subtaskItem->setData(0, RoleId, subtask.id);
-                    subtaskItem->setData(0, RoleTitle, subtask.title);
-                    subtaskItem->setData(
-                        0, RoleSubtaskWorkStatus, static_cast<int>(subtask.workStatus));
-                    subtaskItem->setData(
-                        0, RoleSubtaskWorkStatusIcon, Task::workStatusIcon(subtask.workStatus));
-                    subtaskItem->setCheckState(0, Qt::Unchecked);
-                    subtaskItem->setFlags((subtaskItem->flags() | Qt::ItemIsUserCheckable) &
-                                          ~Qt::ItemIsSelectable);
-                }
             }
         }
     }
