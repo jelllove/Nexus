@@ -89,4 +89,4 @@ The database (`nexus.db`) is stored in `%APPDATA%\Nexus\Nexus\` by default.
 
 ## License
 
-Private — All rights reserved.
+MIT License. See [LICENSE](./LICENSE).

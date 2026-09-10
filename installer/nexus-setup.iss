@@ -2,7 +2,7 @@
 ; Requires Inno Setup 6
 
 #define MyAppName "Nexus"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 #define MyAppPublisher "jelllove"
 #define MyAppURL "https://www.jelllove.com"
 #define MyAppExeName "Nexus.exe"
