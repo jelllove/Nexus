@@ -1135,6 +1135,15 @@ void MainWindow::onUpdateAvailable(const QString &latestVersion,
                                     const QString &downloadUrl,
                                     const QString &releaseNotes)
 {
+    const bool autoInstallEnabled =
+        DatabaseManager::instance().getSetting("auto_install_updates", "true") == "true";
+    if (autoInstallEnabled) {
+        statusBar()->showMessage(
+            QString("New version %1 found. Downloading update automatically...").arg(latestVersion));
+        UpdateService::instance().downloadAndInstall(downloadUrl);
+        return;
+    }
+
     // Truncate release notes for display
     QString notes = releaseNotes.left(500);
     if (releaseNotes.length() > 500) notes += "...";

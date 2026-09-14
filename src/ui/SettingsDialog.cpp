@@ -98,6 +98,9 @@ void SettingsDialog::setupUi()
 
     m_checkUpdates = new QCheckBox("Check for updates on startup", this);
     updateLayout->addRow(m_checkUpdates);
+    m_autoInstallUpdates = new QCheckBox(
+        "Automatically download and install when a new release is found", this);
+    updateLayout->addRow(m_autoInstallUpdates);
 
     mainLayout->addWidget(updateGroup);
 
@@ -119,6 +122,7 @@ void SettingsDialog::loadSettings()
     m_aiModel->setText(db.getSetting("ai_model", "gpt-4o-mini"));
     m_hotkeyEdit->setText(db.getSetting("global_hotkey", "Ctrl+Shift+N"));
     m_checkUpdates->setChecked(db.getSetting("check_updates", "true") == "true");
+    m_autoInstallUpdates->setChecked(db.getSetting("auto_install_updates", "true") == "true");
 }
 
 void SettingsDialog::onSave()
@@ -142,6 +146,7 @@ void SettingsDialog::onSave()
     db.setSetting("ai_model", m_aiModel->text().trimmed());
     db.setSetting("global_hotkey", m_hotkeyEdit->text().trimmed());
     db.setSetting("check_updates", m_checkUpdates->isChecked() ? "true" : "false");
+    db.setSetting("auto_install_updates", m_autoInstallUpdates->isChecked() ? "true" : "false");
     accept();
 }
 

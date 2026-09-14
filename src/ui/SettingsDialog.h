@@ -37,4 +37,5 @@ private:
 
     // Update settings
     QCheckBox *m_checkUpdates;
+    QCheckBox *m_autoInstallUpdates;
 };

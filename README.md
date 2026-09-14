@@ -19,6 +19,7 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **Product Ordering & Archive** — Drag to reorder products, archive/reactivate products, and expand archived products below the active list
 - **System Tray** — Minimize to tray; restore with a click
 - **Global Hotkey** — Win32 `RegisterHotKey` to summon the window from anywhere
+- **GitHub Release Auto-Update** — Checks latest GitHub release on startup and can automatically download/launch installer updates
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
 - **Image Support** — Paste or drag images into the editor; stored locally in AppData
 - **Content History** — Automatic snapshots for undo/redo support
