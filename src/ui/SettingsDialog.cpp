@@ -96,11 +96,16 @@ void SettingsDialog::setupUi()
     auto *updateGroup = new QGroupBox("Updates", this);
     auto *updateLayout = new QFormLayout(updateGroup);
 
-    m_checkUpdates = new QCheckBox("Check for updates on startup", this);
+    m_checkUpdates = new QCheckBox("Check for updates on startup and every 2 hours", this);
     updateLayout->addRow(m_checkUpdates);
     m_autoInstallUpdates = new QCheckBox(
-        "Automatically download and install when a new release is found", this);
+        "Automatically download updates (ask before installing)", this);
     updateLayout->addRow(m_autoInstallUpdates);
+    auto *updateNote = new QLabel(
+        "Checks continue while Nexus is in the system tray. You can postpone installation.\n"
+        "Help > Check for Updates works even when automatic checks are disabled.", this);
+    updateNote->setWordWrap(true);
+    updateLayout->addRow(updateNote);
 
     mainLayout->addWidget(updateGroup);
 

@@ -2,16 +2,28 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QApplication>
+#include <QCoreApplication>
 #include <QStandardPaths>
 #include <QFile>
 #include <QDir>
+#include <QTemporaryFile>
 #include <QVersionNumber>
+#include <QDebug>
 
-UpdateService::UpdateService()
-    : QObject(nullptr)
-    , m_nam(new QNetworkAccessManager(this))
+UpdateService::UpdateService(QNetworkAccessManager *networkManager, QObject *parent)
+    : QObject(parent)
+    , m_nam(networkManager ? networkManager : new QNetworkAccessManager(this))
+    , m_checkTimer(new QTimer(this))
 {
+    m_checkTimer->setObjectName("updateCheckTimer");
+    m_checkTimer->setInterval(2 * 60 * 60 * 1000);
+    m_checkTimer->setTimerType(Qt::PreciseTimer);
+    connect(m_checkTimer, &QTimer::timeout, this, [this]() {
+        checkForUpdate(false);
+    });
+    connect(this, &UpdateService::error, this, [](const QString &message) {
+        qWarning().noquote() << "Update:" << message;
+    });
 }
 
 UpdateService& UpdateService::instance()
@@ -20,18 +32,46 @@ UpdateService& UpdateService::instance()
     return inst;
 }
 
-void UpdateService::checkForUpdate()
+void UpdateService::setAutomaticChecksEnabled(bool enabled)
 {
+    if (enabled == m_checkTimer->isActive()) {
+        return;
+    }
+    if (!enabled) {
+        m_checkTimer->stop();
+        return;
+    }
+
+    m_checkTimer->start();
+    QTimer::singleShot(0, this, [this]() { checkForUpdate(false); });
+}
+
+bool UpdateService::isBusy() const
+{
+    return m_checkReply || m_downloadReply;
+}
+
+void UpdateService::checkForUpdate(bool manual)
+{
+    if (isBusy() || (!manual && !m_checkTimer->isActive())) {
+        return;
+    }
     QNetworkRequest request(QUrl("https://api.github.com/repos/jelllove/Nexus/releases/latest"));
     request.setRawHeader("Accept", "application/vnd.github+json");
     request.setRawHeader("User-Agent", "Nexus-Updater");
+    request.setTransferTimeout(30000);
 
     QNetworkReply *reply = m_nam->get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    m_checkReply = reply;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, manual]() {
+        m_checkReply.clear();
         reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
             emit error("Update check failed: " + reply->errorString());
+            return;
+        }
+        if (!manual && !m_checkTimer->isActive()) {
             return;
         }
 
@@ -56,8 +96,15 @@ void UpdateService::checkForUpdate()
         QVersionNumber remote = QVersionNumber::fromString(remoteVersion);
         QVersionNumber local = QVersionNumber::fromString(localVersion);
 
-        if (remote <= local) {
-            // Already up to date
+        if (remote.isNull() || local.isNull()) {
+            emit error("Invalid release or application version");
+            return;
+        }
+        if (release["draft"].toBool() || release["prerelease"].toBool() || remote <= local) {
+            if (manual) emit upToDate();
+            return;
+        }
+        if (!manual && tagName == m_notifiedVersion) {
             return;
         }
 
@@ -78,45 +125,73 @@ void UpdateService::checkForUpdate()
             return;
         }
 
+        m_notifiedVersion = tagName;
         emit updateAvailable(tagName, downloadUrl, releaseNotes);
     });
 }
 
 void UpdateService::downloadAndInstall(const QString &downloadUrl)
 {
+    if (isBusy()) {
+        return;
+    }
+    if (downloadUrl == m_installerUrl && QFile::exists(m_installerPath)) {
+        emit downloadFinished(m_installerPath);
+        return;
+    }
     QUrl url(downloadUrl);
+    if (!url.isValid() || url.scheme() != "https" || url.host() != "github.com"
+        || !url.path().startsWith("/jelllove/Nexus/releases/download/")) {
+        m_notifiedVersion.clear();
+        emit error("Invalid Nexus installer download URL");
+        return;
+    }
     QNetworkRequest request(url);
     request.setRawHeader("User-Agent", "Nexus-Updater");
+    request.setTransferTimeout(60000);
     // GitHub redirects asset downloads; follow redirects
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply *reply = m_nam->get(request);
+    m_downloadReply = reply;
 
     connect(reply, &QNetworkReply::downloadProgress,
             this, &UpdateService::downloadProgress);
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, downloadUrl]() {
+        m_downloadReply.clear();
         reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
+            m_notifiedVersion.clear();
             emit error("Download failed: " + reply->errorString());
             return;
         }
 
-        // Save to temp directory
-        QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-        QString installerPath = tempDir + "/Nexus-Setup.exe";
-
-        QFile file(installerPath);
-        if (!file.open(QIODevice::WriteOnly)) {
+        const QByteArray data = reply->readAll();
+        if (data.isEmpty()) {
+            m_notifiedVersion.clear();
+            emit error("Downloaded installer is empty");
+            return;
+        }
+        const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+        QTemporaryFile file(QDir(tempDir).filePath("Nexus-Update-XXXXXX.exe"));
+        if (!file.open()) {
+            m_notifiedVersion.clear();
             emit error("Failed to save installer: " + file.errorString());
             return;
         }
-
-        file.write(reply->readAll());
+        if (file.write(data) != data.size() || !file.flush()) {
+            m_notifiedVersion.clear();
+            emit error("Failed to write installer: " + file.errorString());
+            return;
+        }
+        const QString installerPath = file.fileName();
         file.close();
-
+        file.setAutoRemove(false);
+        m_installerUrl = downloadUrl;
+        m_installerPath = installerPath;
         emit downloadFinished(installerPath);
     });
 }

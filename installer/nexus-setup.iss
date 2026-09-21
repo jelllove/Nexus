@@ -2,10 +2,13 @@
 ; Requires Inno Setup 6
 
 #define MyAppName "Nexus"
-#define MyAppVersion "1.0.6"
+#define MyAppVersion "1.0.7"
 #define MyAppPublisher "jelllove"
 #define MyAppURL "https://www.jelllove.com"
 #define MyAppExeName "Nexus.exe"
+#ifndef MyAppSourceDir
+  #define MyAppSourceDir "..\dist"
+#endif
 
 [Setup]
 AppId={{B1F2A3D4-E5F6-7890-ABCD-EF1234567890}
@@ -36,7 +39,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

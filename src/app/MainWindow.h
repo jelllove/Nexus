@@ -68,6 +68,7 @@ private:
     void setupTrayIcon();
     void setupGlobalHotkey();
     void setupMenuBar();
+    void setupUpdates();
     void toggleVisibility();
     void checkForUpdates();
     bool prepareMarkdownPayload(PreparedMarkdownPayload &payload, const QString &actionName);
@@ -101,4 +102,6 @@ private:
     bool m_searchActive = false;
     SearchViewSnapshot m_searchSnapshot;
     QPointer<MarkdownPreviewDialog> m_markdownPreviewDialog;
+    QString m_pendingInstallerPath;
+    bool m_updatePromptOpen = false;
 };

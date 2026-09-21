@@ -19,6 +19,7 @@ public:
     void loadTask(int taskId);
     void loadSubTask(int subTaskId);
     void clear();
+    bool saveCurrentContent();
     void resetTitleGenerationPending() { m_titleGenerationPending = false; }
 
 signals:
@@ -49,4 +50,5 @@ private:
     QString m_pendingTitle;
     QString m_pendingTimestamp;
     bool m_titleGenerationPending = false;
+    QString m_currentContent;
 };

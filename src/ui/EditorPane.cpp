@@ -6,6 +6,7 @@
 #include <QDesktopServices>
 #include <QWebEnginePage>
 #include <QRegularExpression>
+#include <QDebug>
 
 // Custom page that intercepts link clicks and opens them externally
 class EditorWebPage : public QWebEnginePage
@@ -97,6 +98,7 @@ void EditorPane::loadTask(int taskId)
 
     QString title = task.title;
     QString content = task.content;
+    m_currentContent = content;
     QString timestamp;
     if (task.updatedAt.isValid()) {
         timestamp = task.updatedAt.toString("dddd, MMMM d, yyyy    h:mm AP");
@@ -139,6 +141,7 @@ void EditorPane::loadSubTask(int subTaskId)
 
     QString title = subTask.title;
     QString content = subTask.content;
+    m_currentContent = content;
     QString timestamp;
     if (subTask.updatedAt.isValid()) {
         timestamp = subTask.updatedAt.toString("dddd, MMMM d, yyyy    h:mm AP");
@@ -165,6 +168,7 @@ void EditorPane::clear()
 {
     m_currentTaskId = -1;
     m_currentSubTaskId = -1;
+    m_currentContent.clear();
     if (m_editorReady) {
         m_webView->page()->runJavaScript("window.setPageTitle('')");
         m_webView->page()->runJavaScript("window.setPageTimestamp('')");
@@ -192,6 +196,7 @@ void EditorPane::onEditorContentChanged(const QString &content)
     }
 
     // Restart auto-save timer
+    m_currentContent = content;
     m_autoSaveTimer->start();
 }
 
@@ -212,38 +217,48 @@ void EditorPane::onEditorReady()
     }
 }
 
+bool EditorPane::saveCurrentContent()
+{
+    auto &db = DatabaseManager::instance();
+    if (m_currentTaskId > 0) {
+        if (!db.updateTaskContent(m_currentTaskId, m_currentContent)) {
+            qWarning() << "Failed to save task content:" << m_currentTaskId;
+            return false;
+        }
+        db.saveContentSnapshot(m_currentTaskId, m_currentContent);
+        emit contentChanged(m_currentTaskId, m_currentContent);
+    } else if (m_currentSubTaskId > 0) {
+        if (!db.updateSubtaskContent(m_currentSubTaskId, m_currentContent)) {
+            qWarning() << "Failed to save subtask content:" << m_currentSubTaskId;
+            return false;
+        }
+        emit contentChanged(m_currentSubTaskId, m_currentContent);
+    }
+    m_autoSaveTimer->stop();
+    return true;
+}
+
 void EditorPane::onAutoSave()
 {
-    QString content = m_bridge->content();
-
+    if (!saveCurrentContent()) {
+        m_autoSaveTimer->start();
+        return;
+    }
     if (m_currentTaskId > 0) {
-        // Save to database
-        DatabaseManager::instance().updateTaskContent(m_currentTaskId, content);
-
-        // Save snapshot for undo history
-        DatabaseManager::instance().saveContentSnapshot(m_currentTaskId, content);
-
-        emit contentChanged(m_currentTaskId, content);
 
         // Auto-generate title if empty
         if (!m_titleGenerationPending) {
             Task task = DatabaseManager::instance().getTask(m_currentTaskId);
             if (task.title.trimmed().isEmpty()) {
-                QString plain = content;
+                QString plain = m_currentContent;
                 plain.remove(QRegularExpression("<[^>]*>"));
                 plain = plain.trimmed();
                 if (!plain.isEmpty()) {
                     m_titleGenerationPending = true;
-                    emit autoGenerateTitleRequested(m_currentTaskId, content);
+                    emit autoGenerateTitleRequested(m_currentTaskId, m_currentContent);
                 }
             }
         }
-        return;
-    }
-
-    if (m_currentSubTaskId > 0) {
-        DatabaseManager::instance().updateSubtaskContent(m_currentSubTaskId, content);
-        emit contentChanged(m_currentSubTaskId, content);
     }
 }
 

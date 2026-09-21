@@ -19,7 +19,7 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **Product Ordering & Archive** — Drag to reorder products, archive/reactivate products, and expand archived products below the active list
 - **System Tray** — Minimize to tray; restore with a click
 - **Global Hotkey** — Win32 `RegisterHotKey` to summon the window from anywhere
-- **GitHub Release Auto-Update** — Checks latest GitHub release on startup and can automatically download/launch installer updates
+- **GitHub Release Auto-Update** — Checks on startup and every 2 hours while running (including in the system tray), optionally downloads updates automatically, and asks before saving the current note and launching the installer
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
 - **Image Support** — Paste or drag images into the editor; stored locally in AppData
 - **Content History** — Automatic snapshots for undo/redo support
@@ -87,6 +87,24 @@ dist\Nexus.exe
 ```
 
 The database (`nexus.db`) is stored in `%APPDATA%\Nexus\Nexus\` by default.
+
+## Update checks
+
+- **Settings > Updates** controls automatic startup and two-hour checks; changes take effect immediately.
+- **Help > Check for Updates** also works when automatic checks are disabled.
+- Checks and downloads cannot overlap. Background errors are logged and shown in the status bar, not an error popup; the next scheduled check can retry.
+- The same release is not repeatedly prompted during a session. Manual checks can retry a dismissed update.
+- Automatic download does not mean automatic shutdown: **Install now** saves the current task or subtask before launching the installer. If saving or launching fails, Nexus stays open.
+- Choose **Later** to keep working; use **Help > Check for Updates** to reopen the downloaded update without downloading it again during the same session.
+- Checking requires Nexus to be running and Windows awake. This is not a Windows background service, and the installer may still require UAC confirmation.
+
+## Tests
+
+With the Qt Test component installed, configure with `-DBUILD_TESTING=ON`, build,
+then run `ctest --test-dir build -C Release --output-on-failure`.
+On Windows, add your Qt `bin` directory to `PATH` before running tests.
+The two test reports are saved in `build/UpdateServiceTest.txt` and
+`build/UpdateUiTest.txt`; test executables are kept separately under `build/tests`.
 
 ## License
 

@@ -77,8 +77,7 @@ MainWindow::MainWindow(QWidget *parent)
             .arg(qApp->applicationVersion(),
                  buildCommit.isEmpty() ? QStringLiteral("unknown") : buildCommit));
 
-    // Check for updates
-    checkForUpdates();
+    setupUpdates();
 }
 
 MainWindow::~MainWindow()
@@ -450,7 +449,10 @@ void MainWindow::onSummaryGenerated(const QString &summary)
 void MainWindow::showSettings()
 {
     SettingsDialog dialog(this);
-    dialog.exec();
+    if (dialog.exec() == QDialog::Accepted) {
+        UpdateService::instance().setAutomaticChecksEnabled(
+            DatabaseManager::instance().getSetting("check_updates", "true") == "true");
+    }
 }
 
 void MainWindow::exportTasksToMarkdown()
@@ -1104,19 +1106,9 @@ bool MainWindow::resolveSimpleDescriptions(
     return true;
 }
 
-void MainWindow::checkForUpdates()
+void MainWindow::setupUpdates()
 {
-    QString checkUpdates = DatabaseManager::instance().getSetting("check_updates", "true");
-    if (checkUpdates != "true") return;
-
     auto &updater = UpdateService::instance();
-
-    // Disconnect previous connections to avoid duplicates
-    disconnect(&updater, &UpdateService::updateAvailable, this, nullptr);
-    disconnect(&updater, &UpdateService::downloadProgress, this, nullptr);
-    disconnect(&updater, &UpdateService::downloadFinished, this, nullptr);
-    disconnect(&updater, &UpdateService::error, this, nullptr);
-
     connect(&updater, &UpdateService::updateAvailable,
             this, &MainWindow::onUpdateAvailable);
     connect(&updater, &UpdateService::downloadProgress,
@@ -1127,8 +1119,26 @@ void MainWindow::checkForUpdates()
             this, [this](const QString &msg) {
                 statusBar()->showMessage("Update: " + msg, 5000);
             });
+    connect(&updater, &UpdateService::upToDate, this, [this]() {
+        statusBar()->showMessage("Nexus is up to date.", 5000);
+    });
+    updater.setAutomaticChecksEnabled(
+        DatabaseManager::instance().getSetting("check_updates", "true") == "true");
+}
 
-    updater.checkForUpdate();
+void MainWindow::checkForUpdates()
+{
+    if (m_updatePromptOpen) return;
+    auto &updater = UpdateService::instance();
+    if (updater.isBusy()) {
+        statusBar()->showMessage("An update check or download is already in progress.", 5000);
+        return;
+    }
+    if (!m_pendingInstallerPath.isEmpty() && QFile::exists(m_pendingInstallerPath)) {
+        onDownloadFinished(m_pendingInstallerPath);
+        return;
+    }
+    updater.checkForUpdate(true);
 }
 
 void MainWindow::onUpdateAvailable(const QString &latestVersion,
@@ -1148,6 +1158,7 @@ void MainWindow::onUpdateAvailable(const QString &latestVersion,
     QString notes = releaseNotes.left(500);
     if (releaseNotes.length() > 500) notes += "...";
 
+    m_updatePromptOpen = true;
     int ret = QMessageBox::question(this, "Update Available",
         QString("A new version of Nexus is available!\n\n"
                 "Current version: v%1\n"
@@ -1156,6 +1167,7 @@ void MainWindow::onUpdateAvailable(const QString &latestVersion,
                 "Would you like to download and install the update?")
             .arg(qApp->applicationVersion(), latestVersion, notes),
         QMessageBox::Yes | QMessageBox::No);
+    m_updatePromptOpen = false;
 
     if (ret == QMessageBox::Yes) {
         statusBar()->showMessage("Downloading update...");
@@ -1173,9 +1185,32 @@ void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
 
 void MainWindow::onDownloadFinished(const QString &installerPath)
 {
-    statusBar()->showMessage("Download complete. Launching installer...");
+    m_pendingInstallerPath = installerPath;
+    if (m_updatePromptOpen) return;
+    m_updatePromptOpen = true;
+    QMessageBox prompt(QMessageBox::Information, "Update Ready",
+                       "The update has been downloaded. Install it now?\n\n"
+                       "Nexus will save the current note and close after launching the installer.",
+                       QMessageBox::NoButton, this);
+    QPushButton *installButton = prompt.addButton("Install now", QMessageBox::AcceptRole);
+    QPushButton *laterButton = prompt.addButton("Later", QMessageBox::RejectRole);
+    prompt.setDefaultButton(laterButton);
+    prompt.setEscapeButton(laterButton);
+    prompt.exec();
+    m_updatePromptOpen = false;
+    if (prompt.clickedButton() != installButton) {
+        statusBar()->showMessage(
+            "Update ready. Use Help > Check for Updates to install later.", 10000);
+        return;
+    }
+    if (!m_editorPane->saveCurrentContent()) {
+        QMessageBox::warning(this, "Update Deferred",
+                             "The current note could not be saved. Nexus will stay open.\n"
+                             "Please resolve the database error before installing the update.");
+        return;
+    }
 
-    // Launch the installer and quit
+    statusBar()->showMessage("Launching installer...");
     bool started = QProcess::startDetached(installerPath, QStringList());
     if (started) {
         qApp->quit();
