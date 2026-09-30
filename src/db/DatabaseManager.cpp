@@ -1135,6 +1135,92 @@ bool DatabaseManager::renameSubtask(int subtaskId, const QString &title)
     return query.exec();
 }
 
+bool DatabaseManager::moveSubtask(int subtaskId, int destinationTaskId, int position,
+                                  QString *errorMessage)
+{
+    if (errorMessage) errorMessage->clear();
+    bool transactionOpen = false;
+    auto fail = [&](const QString &message) {
+        if (transactionOpen && !m_db.rollback())
+            qWarning() << "Failed to roll back subtask move:" << m_db.lastError().text();
+        qWarning() << "Failed to move subtask:" << subtaskId << message;
+        if (errorMessage) *errorMessage = message;
+        return false;
+    };
+
+    if (subtaskId <= 0 || destinationTaskId <= 0 || position < -1)
+        return fail("Invalid subtask, destination or position.");
+    if (!m_db.transaction())
+        return fail(m_db.lastError().text());
+    transactionOpen = true;
+
+    QSqlQuery query(m_db);
+    query.prepare("SELECT s.task_id, t.status FROM subtasks s "
+                  "JOIN tasks t ON t.id = s.task_id WHERE s.id = ?");
+    query.addBindValue(subtaskId);
+    if (!query.exec()) return fail(query.lastError().text());
+    if (!query.next()) return fail("The subtask no longer exists.");
+    const int sourceTaskId = query.value(0).toInt();
+    if (taskStatusFromDb(query.value(1).toString()) == TaskStatus::Deleted)
+        return fail("Restore the deleted main task before moving its subtasks.");
+    query.finish();
+
+    query.prepare("SELECT status FROM tasks WHERE id = ?");
+    query.addBindValue(destinationTaskId);
+    if (!query.exec()) return fail(query.lastError().text());
+    if (!query.next()) return fail("The destination main task no longer exists.");
+    if (taskStatusFromDb(query.value(0).toString()) == TaskStatus::Deleted)
+        return fail("Subtasks cannot be moved to a deleted main task.");
+    query.finish();
+
+    QList<int> sourceIds;
+    QList<int> destinationIds;
+    query.prepare("SELECT id, task_id FROM subtasks WHERE task_id IN (?, ?) "
+                  "ORDER BY sort_order ASC, id ASC");
+    query.addBindValue(sourceTaskId);
+    query.addBindValue(destinationTaskId);
+    if (!query.exec()) return fail(query.lastError().text());
+    while (query.next()) {
+        if (query.value(1).toInt() == sourceTaskId)
+            sourceIds.append(query.value(0).toInt());
+        else
+            destinationIds.append(query.value(0).toInt());
+    }
+    if (query.lastError().isValid()) return fail(query.lastError().text());
+    query.finish();
+    if (!sourceIds.removeOne(subtaskId))
+        return fail("The subtask is no longer under its original main task.");
+    if (sourceTaskId == destinationTaskId)
+        destinationIds = sourceIds;
+    if (position == -1) position = destinationIds.size();
+    if (position > destinationIds.size())
+        return fail("The requested subtask position is out of range.");
+    destinationIds.insert(position, subtaskId);
+
+    if (sourceTaskId != destinationTaskId) {
+        query.prepare("UPDATE subtasks SET task_id = ? WHERE id = ?");
+        query.addBindValue(destinationTaskId);
+        query.addBindValue(subtaskId);
+        if (!query.exec()) return fail(query.lastError().text());
+        if (query.numRowsAffected() != 1) return fail("The subtask could not be moved.");
+    }
+
+    auto resequence = [&](const QList<int> &ids) {
+        for (int i = 0; i < ids.size(); ++i) {
+            query.prepare("UPDATE subtasks SET sort_order = ? WHERE id = ?");
+            query.addBindValue(i);
+            query.addBindValue(ids[i]);
+            if (!query.exec()) return fail(query.lastError().text());
+            if (query.numRowsAffected() != 1) return fail("The subtask order could not be saved.");
+        }
+        return true;
+    };
+    if (sourceTaskId != destinationTaskId && !resequence(sourceIds)) return false;
+    if (!resequence(destinationIds)) return false;
+    if (!m_db.commit()) return fail(m_db.lastError().text());
+    return true;
+}
+
 // --- Content History (Undo/Redo) ---
 
 void DatabaseManager::saveContentSnapshot(int taskId, const QString &content)

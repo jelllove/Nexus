@@ -24,6 +24,10 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
             case Qt::DisplayRole:
             case TitleRole:
                 return row.subtask.title;
+            case Qt::ToolTipRole:
+                return flags(index).testFlag(Qt::ItemIsDragEnabled)
+                    ? "Drag to reorder, or drop on another main task to move. Esc cancels."
+                    : "Restore the main task before moving this subtask.";
             case IsSubTaskRole:
                 return true;
             case SubTaskCompletedRole:
@@ -158,6 +162,16 @@ int TaskListModel::rowForTaskId(int taskId) const
     return -1;
 }
 
+int TaskListModel::rowForSubTaskId(int subtaskId) const
+{
+    for (int i = 0; i < m_displayRows.size(); ++i) {
+        if (m_displayRows[i].type == DisplayRow::SubTaskRow &&
+            m_displayRows[i].subtask.id == subtaskId)
+            return i;
+    }
+    return -1;
+}
+
 Task TaskListModel::taskAt(int row) const
 {
     if (row < 0 || row >= m_displayRows.size()) return Task();
@@ -218,6 +232,13 @@ Qt::ItemFlags TaskListModel::flags(const QModelIndex &index) const
     if (index.row() < m_displayRows.size() &&
         m_displayRows[index.row()].type == DisplayRow::MainTask) {
         return defaultFlags | Qt::ItemIsDragEnabled;
+    }
+    if (index.row() < m_displayRows.size()) {
+        const int parentId = m_displayRows[index.row()].subtask.taskId;
+        for (const Task &task : m_tasks) {
+            if (task.id == parentId && task.status != TaskStatus::Deleted)
+                return defaultFlags | Qt::ItemIsDragEnabled;
+        }
     }
     return defaultFlags;
 }

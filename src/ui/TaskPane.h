@@ -29,10 +29,12 @@ public:
     void restoreView(int productId, ViewMode mode, int selectedTaskId);
     ViewMode viewMode() const;
     int selectedTaskId() const;
+    bool revealSubTask(int subtaskId, bool followParent);
 
 signals:
     void taskSelected(int taskId);
     void subTaskSelected(int subTaskId);
+    void subTaskMoveRequested(int subtaskId, int destinationTaskId, int position);
 
 private slots:
     void onTaskClicked(const QModelIndex &index);
@@ -52,6 +54,7 @@ private:
     void showPriorityPopup(const QModelIndex &index, const QPoint &globalPos);
     void showWorkStatusPopup(const QModelIndex &index, const QPoint &globalPos);
     void showSubTaskStatusPopup(int subtaskId, int currentStatus, const QPoint &globalPos);
+    void showMoveSubTaskDialog(int subtaskId);
     void handleDropReorder(int fromRow, int toRow);
     QDateTime showDueDateDialog(const QDateTime &current = QDateTime());
 

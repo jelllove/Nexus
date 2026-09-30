@@ -1,5 +1,6 @@
 #include "TaskPane.h"
 #include "ui/TaskCardDelegate.h"
+#include "ui/TaskListView.h"
 #include "db/DatabaseManager.h"
 #include <QInputDialog>
 #include <QMessageBox>
@@ -16,6 +17,8 @@
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QCheckBox>
+#include <QTreeWidget>
+#include <QHeaderView>
 
 TaskPane::TaskPane(QWidget *parent)
     : QWidget(parent)
@@ -65,8 +68,10 @@ void TaskPane::setupUi()
 
     // List view with card delegate
     m_model = new TaskListModel(this);
-    m_listView = new QListView(this);
-    m_listView->setModel(m_model);
+    auto *taskListView = new TaskListView(m_model, this);
+    m_listView = taskListView;
+    connect(taskListView, &TaskListView::subTaskMoveRequested,
+            this, &TaskPane::subTaskMoveRequested);
     m_listView->setItemDelegate(new TaskCardDelegate(this));
     m_listView->setSpacing(2);
     m_listView->setStyleSheet(
@@ -219,6 +224,21 @@ void TaskPane::setupContextMenu()
 
             QAction *renameAction = menu.addAction("Rename");
             menu.addSeparator();
+            const int parentId = index.data(TaskListModel::ParentTaskIdRole).toInt();
+            const auto siblings = DatabaseManager::instance().getSubtasks(parentId);
+            int position = -1;
+            for (int i = 0; i < siblings.size(); ++i) {
+                if (siblings[i].id == subtaskId) position = i;
+            }
+            const bool canMove = position >= 0 &&
+                DatabaseManager::instance().getTask(parentId).status != TaskStatus::Deleted;
+            QAction *moveUpAction = menu.addAction("Move Up");
+            QAction *moveDownAction = menu.addAction("Move Down");
+            QAction *moveToAction = menu.addAction("Move to Main Task...");
+            moveUpAction->setEnabled(canMove && position > 0);
+            moveDownAction->setEnabled(canMove && position + 1 < siblings.size());
+            moveToAction->setEnabled(canMove);
+            menu.addSeparator();
             QAction *deleteAction = menu.addAction("Delete");
 
             QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
@@ -231,7 +251,12 @@ void TaskPane::setupContextMenu()
                 }
             }
 
-            if (selected == renameAction) {
+            if (selected == moveUpAction || selected == moveDownAction) {
+                emit subTaskMoveRequested(subtaskId, parentId,
+                    position + (selected == moveUpAction ? -1 : 1));
+            } else if (selected == moveToAction) {
+                showMoveSubTaskDialog(subtaskId);
+            } else if (selected == renameAction) {
                 QString currentTitle = index.data(TaskListModel::TitleRole).toString();
                 bool ok;
                 QString newTitle = QInputDialog::getText(this, "Rename Sub Task",
@@ -385,6 +410,114 @@ void TaskPane::setupContextMenu()
             }
         }
     });
+}
+
+void TaskPane::showMoveSubTaskDialog(int subtaskId)
+{
+    auto &db = DatabaseManager::instance();
+    const SubTask subtask = db.getSubtask(subtaskId);
+    QDialog dialog(this);
+    dialog.setObjectName("moveSubtaskDialog");
+    dialog.setWindowTitle("Move Sub Task");
+    dialog.resize(560, 460);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *label = new QLabel(QString("Move \"%1\" to the end of another main task.")
+                                 .arg(subtask.title), &dialog);
+    label->setTextFormat(Qt::PlainText);
+    label->setWordWrap(true);
+    layout->addWidget(label);
+    auto *search = new QLineEdit(&dialog);
+    search->setPlaceholderText("Search products or main tasks...");
+    search->setClearButtonEnabled(true);
+    layout->addWidget(search);
+    auto *tree = new QTreeWidget(&dialog);
+    tree->setHeaderLabels({"Main task", "State"});
+    tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    layout->addWidget(tree);
+
+    const auto products = db.getProductsByStatus(ProductStatus::Active) +
+                          db.getProductsByStatus(ProductStatus::Archived);
+    for (const Product &product : products) {
+        QTreeWidgetItem *group = nullptr;
+        for (TaskStatus status : {TaskStatus::Active, TaskStatus::Archived}) {
+            for (const Task &task : db.getTasksForProduct(product.id, status)) {
+                if (task.id == subtask.taskId) continue;
+                if (!group) {
+                    group = new QTreeWidgetItem(tree, {product.name,
+                        product.status == ProductStatus::Archived ? "Archived product" : ""});
+                    group->setFlags(group->flags() & ~Qt::ItemIsSelectable);
+                }
+                auto *item = new QTreeWidgetItem(group,
+                    {QString("%1 (#%2)").arg(task.title).arg(task.id),
+                     status == TaskStatus::Archived ? "Archived" : "Active"});
+                item->setData(0, Qt::UserRole, task.id);
+                item->setToolTip(0, item->text(0));
+            }
+        }
+    }
+    tree->expandAll();
+    auto *emptyLabel = new QLabel("No matching main tasks. Create another main task or change the search.", &dialog);
+    emptyLabel->setWordWrap(true);
+    emptyLabel->setVisible(tree->topLevelItemCount() == 0);
+    layout->addWidget(emptyLabel);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    auto *moveButton = buttons->button(QDialogButtonBox::Ok);
+    moveButton->setText("Move");
+    moveButton->setEnabled(false);
+    layout->addWidget(buttons);
+    auto updateMoveButton = [tree, moveButton]() {
+        auto *item = tree->currentItem();
+        moveButton->setEnabled(item && item->parent() && !item->isHidden() &&
+                               !item->parent()->isHidden());
+    };
+    connect(tree, &QTreeWidget::itemSelectionChanged, &dialog, updateMoveButton);
+    connect(search, &QLineEdit::textChanged, &dialog,
+            [tree, emptyLabel, updateMoveButton](const QString &text) {
+        bool anyVisible = false;
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            auto *group = tree->topLevelItem(i);
+            bool groupVisible = false;
+            for (int j = 0; j < group->childCount(); ++j) {
+                auto *item = group->child(j);
+                const bool matches = (group->text(0) + " " + item->text(0))
+                                         .contains(text.trimmed(), Qt::CaseInsensitive);
+                item->setHidden(!matches);
+                groupVisible |= matches;
+            }
+            group->setHidden(!groupVisible);
+            group->setExpanded(true);
+            anyVisible |= groupVisible;
+        }
+        emptyLabel->setVisible(!anyVisible);
+        updateMoveButton();
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() == QDialog::Accepted && moveButton->isEnabled())
+        emit subTaskMoveRequested(subtaskId, tree->currentItem()->data(0, Qt::UserRole).toInt(), -1);
+}
+
+bool TaskPane::revealSubTask(int subtaskId, bool followParent)
+{
+    const SubTask subtask = DatabaseManager::instance().getSubtask(subtaskId);
+    if (followParent) {
+        const Task parent = DatabaseManager::instance().getTask(subtask.taskId);
+        m_showingArchived = parent.status == TaskStatus::Archived;
+        m_showingDeleted = false;
+        loadTasks(parent.productId);
+    } else {
+        refreshCurrentList();
+    }
+    if (!m_model->isExpanded(subtask.taskId))
+        m_model->toggleExpand(subtask.taskId);
+    const int row = m_model->rowForSubTaskId(subtaskId);
+    if (row < 0) return false;
+    m_model->setActiveTaskId(-1);
+    const QModelIndex index = m_model->index(row);
+    m_listView->setCurrentIndex(index);
+    m_listView->scrollTo(index);
+    m_listView->viewport()->update();
+    return true;
 }
 
 void TaskPane::loadTasks(int productId)

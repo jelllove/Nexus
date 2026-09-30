@@ -57,6 +57,7 @@ public:
     void loadSearchResults(const QList<Task> &tasks);
     int taskIdAt(int row) const;
     int rowForTaskId(int taskId) const;
+    int rowForSubTaskId(int subtaskId) const;
     Task taskAt(int row) const;
     int addTask(int productId, const QString &title, TaskPriority priority = TaskPriority::Medium, const QDateTime &dueDate = QDateTime());
     void removeTask(int row);

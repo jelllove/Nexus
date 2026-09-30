@@ -126,6 +126,8 @@ void MainWindow::setupUi()
             this, &MainWindow::onTaskSelected);
     connect(m_taskPane, &TaskPane::subTaskSelected,
             this, &MainWindow::onSubTaskSelected);
+    connect(m_taskPane, &TaskPane::subTaskMoveRequested,
+            this, &MainWindow::onSubTaskMoveRequested);
     connect(m_searchBar, &SearchBar::searchRequested,
             this, &MainWindow::onSearchRequested);
     connect(m_searchBar, &SearchBar::searchCleared,
@@ -281,6 +283,41 @@ void MainWindow::onTaskSelected(int taskId)
 void MainWindow::onSubTaskSelected(int subTaskId)
 {
     m_editorPane->loadSubTask(subTaskId);
+}
+
+void MainWindow::onSubTaskMoveRequested(int subtaskId, int destinationTaskId, int position)
+{
+    if (!m_editorPane->saveCurrentContent()) {
+        QMessageBox::warning(this, "Move Sub Task",
+            "The current note could not be saved. Nothing was moved. Please try again.");
+        return;
+    }
+    auto &db = DatabaseManager::instance();
+    const SubTask subtask = db.getSubtask(subtaskId);
+    QString error;
+    if (!db.moveSubtask(subtaskId, destinationTaskId, position, &error)) {
+        QMessageBox::warning(this, "Move Sub Task", "The subtask could not be moved.\n" + error);
+        return;
+    }
+
+    const bool changedParent = subtask.taskId != destinationTaskId;
+    if (changedParent) {
+        m_searchActive = false;
+        m_searchSnapshot = {};
+        const QSignalBlocker blocker(m_searchBar);
+        m_searchBar->clear();
+        const Task destination = db.getTask(destinationTaskId);
+        if (!m_productPane->selectProductById(destination.productId, false))
+            qWarning() << "Could not select destination product:" << destination.productId;
+    }
+    if (!m_taskPane->revealSubTask(subtaskId, changedParent))
+        QMessageBox::warning(this, "Move Sub Task",
+            "The subtask was moved, but could not be shown in the current list. Reopen its main task.");
+    // Keep the live editor and cursor intact when moving the note already being edited.
+    if (m_editorPane->currentSubTaskId() != subtaskId)
+        m_editorPane->loadSubTask(subtaskId);
+    statusBar()->showMessage(changedParent ? "Subtask moved to its new main task."
+                                          : "Subtask order updated.", 4000);
 }
 
 void MainWindow::onSearchRequested(const QString &query)

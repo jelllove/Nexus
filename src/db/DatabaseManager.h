@@ -62,6 +62,9 @@ public:
     bool toggleSubtask(int subtaskId, bool completed);
     bool deleteSubtask(int subtaskId);
     bool renameSubtask(int subtaskId, const QString &title);
+    // Position is the final zero-based index after removal; -1 appends.
+    bool moveSubtask(int subtaskId, int destinationTaskId, int position = -1,
+                     QString *errorMessage = nullptr);
 
     // Content history (undo/redo)
     void saveContentSnapshot(int taskId, const QString &content);

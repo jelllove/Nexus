@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Nexus VERSION 1.0.7 LANGUAGES CXX)
+project(Nexus VERSION 1.0.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +27,7 @@ set(SOURCES
     src/models/TaskListModel.cpp
     src/ui/ProductPane.cpp
     src/ui/TaskPane.cpp
+    src/ui/TaskListView.cpp
     src/ui/TaskCardDelegate.cpp
     src/ui/ExportProgressDialog.cpp
     src/ui/MarkdownPreviewDialog.cpp
@@ -50,6 +51,7 @@ set(HEADERS
     src/models/TaskListModel.h
     src/ui/ProductPane.h
     src/ui/TaskPane.h
+    src/ui/TaskListView.h
     src/ui/TaskCardDelegate.h
     src/ui/ExportProgressDialog.h
     src/ui/MarkdownPreviewDialog.h
@@ -104,6 +106,20 @@ if(BUILD_TESTING)
     add_test(NAME UpdateUiTest COMMAND UpdateUiTest
         -o "${CMAKE_CURRENT_BINARY_DIR}/UpdateUiTest.txt,txt")
     set_tests_properties(UpdateUiTest PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
+        TIMEOUT 60)
+    add_executable(SubtaskMoveTest tests/SubtaskMoveTest.cpp ${UPDATE_UI_TEST_SOURCES} ${HEADERS} ${RESOURCES})
+    target_include_directories(SubtaskMoveTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(SubtaskMoveTest PRIVATE Qt6::Widgets Qt6::Sql Qt6::Network
+        Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Test)
+    set_target_properties(SubtaskMoveTest PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
+    if(WIN32)
+        target_link_libraries(SubtaskMoveTest PRIVATE user32)
+    endif()
+    add_test(NAME SubtaskMoveTest COMMAND SubtaskMoveTest
+        -o "${CMAKE_CURRENT_BINARY_DIR}/SubtaskMoveTest.txt,txt")
+    set_tests_properties(SubtaskMoveTest PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
         TIMEOUT 60)
 endif()

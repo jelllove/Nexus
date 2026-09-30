@@ -110,6 +110,13 @@ void TaskCardDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opti
             painter->fillRect(rect, completed ? QColor("#f8f9f9") : QColor("#ffffff"));
         }
 
+        if (index.flags().testFlag(Qt::ItemIsDragEnabled)) {
+            for (int column = 0; column < 2; ++column) {
+                for (int dot = 0; dot < 3; ++dot)
+                    painter->fillRect(rect.left() + 12 + column * 4, rect.top() + 10 + dot * 4,
+                                      2, 2, QColor("#95a5a6"));
+            }
+        }
         QRect statusRect = subtaskStatusIconRect(option);
         QFont statusFont = option.font;
         statusFont.setPointSize(9);

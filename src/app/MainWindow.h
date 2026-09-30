@@ -32,6 +32,7 @@ private slots:
     void onProductSelected(int productId);
     void onTaskSelected(int taskId);
     void onSubTaskSelected(int subTaskId);
+    void onSubTaskMoveRequested(int subtaskId, int destinationTaskId, int position);
     void onTaskTitleChanged(int taskId, const QString &title);
     void onSearchRequested(const QString &query);
     void onSearchCleared();

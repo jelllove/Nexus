@@ -20,6 +20,7 @@ public:
     void loadSubTask(int subTaskId);
     void clear();
     bool saveCurrentContent();
+    int currentSubTaskId() const { return m_currentSubTaskId; }
     void resetTitleGenerationPending() { m_titleGenerationPending = false; }
 
 signals:
