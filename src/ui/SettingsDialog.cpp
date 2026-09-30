@@ -37,7 +37,7 @@ void SettingsDialog::setupUi()
     dbPathLayout->addWidget(browseBtn);
     dbLayout->addRow("Database Path:", dbPathLayout);
 
-    QLabel *dbNote = new QLabel("Changing the path will move the database file to the new location.", this);
+    QLabel *dbNote = new QLabel("Choosing an existing .db switches to it. Choosing a new path moves the current database there.", this);
     dbNote->setStyleSheet("color: #7f8c8d; font-size: 11px;");
     dbLayout->addRow(dbNote);
 

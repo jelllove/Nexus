@@ -807,7 +807,8 @@ bool MainWindow::promptTaskSelectionDialog(
 
     auto *layout = new QVBoxLayout(&dialog);
     auto *hint = new QLabel(
-        "Select what to export in a Product → Main Task → Sub Task tree.",
+        "Select what to export in a Product → Main Task → Sub Task tree.\n"
+        "Everything is pre-selected by default.",
         &dialog);
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -817,6 +818,23 @@ bool MainWindow::promptTaskSelectionDialog(
     tree->setRootIsDecorated(true);
     tree->setSelectionMode(QAbstractItemView::NoSelection);
     layout->addWidget(tree, 1);
+
+    auto isCheckableNode = [](QTreeWidgetItem *node) {
+        return node && !node->isDisabled() && (node->flags() & Qt::ItemIsUserCheckable);
+    };
+
+    auto applyStateRecursively = [&](const auto &self, QTreeWidgetItem *node,
+                                     Qt::CheckState state) -> void {
+        if (!node) {
+            return;
+        }
+        if (isCheckableNode(node)) {
+            node->setCheckState(0, state);
+        }
+        for (int i = 0; i < node->childCount(); ++i) {
+            self(self, node->child(i), state);
+        }
+    };
 
     for (auto it = tasksByProduct.cbegin(); it != tasksByProduct.cend(); ++it) {
         const int productId = it.key();
@@ -871,22 +889,6 @@ bool MainWindow::promptTaskSelectionDialog(
         }
     }
     tree->setUniformRowHeights(false);
-    tree->expandAll();
-    QTimer::singleShot(0, tree, [tree]() {
-        tree->expandAll();
-        tree->viewport()->update();
-    });
-
-    const auto setChildrenCheckState = [](QTreeWidgetItem *node, Qt::CheckState state, const auto &self) -> void {
-        for (int i = 0; i < node->childCount(); ++i) {
-            QTreeWidgetItem *child = node->child(i);
-            if (child->isDisabled()) {
-                continue;
-            }
-            child->setCheckState(0, state);
-            self(child, state, self);
-        }
-    };
 
     bool syncingCheckState = false;
     connect(tree, &QTreeWidget::itemChanged, tree,
@@ -899,20 +901,23 @@ bool MainWindow::promptTaskSelectionDialog(
                 syncingCheckState = true;
                 const Qt::CheckState state = item->checkState(0);
                 if (state != Qt::PartiallyChecked) {
-                    setChildrenCheckState(item, state, setChildrenCheckState);
+                    for (int i = 0; i < item->childCount(); ++i) {
+                        QTreeWidgetItem *child = item->child(i);
+                        applyStateRecursively(applyStateRecursively, child, state);
+                    }
                 }
 
                 QTreeWidgetItem *parent = item->parent();
                 while (parent) {
                     int checkedChildren = 0;
                     int partialChildren = 0;
-                    int effectiveChildCount = 0;
+                    int checkableChildren = 0;
                     for (int i = 0; i < parent->childCount(); ++i) {
                         QTreeWidgetItem *child = parent->child(i);
-                        if (child->isDisabled()) {
+                        if (!isCheckableNode(child)) {
                             continue;
                         }
-                        ++effectiveChildCount;
+                        ++checkableChildren;
                         const Qt::CheckState childState = child->checkState(0);
                         if (childState == Qt::Checked) {
                             checkedChildren++;
@@ -921,9 +926,9 @@ bool MainWindow::promptTaskSelectionDialog(
                         }
                     }
 
-                    if (effectiveChildCount == 0) {
+                    if (checkableChildren == 0) {
                         parent->setCheckState(0, Qt::Unchecked);
-                    } else if (checkedChildren == effectiveChildCount) {
+                    } else if (checkedChildren == checkableChildren) {
                         parent->setCheckState(0, Qt::Checked);
                     } else if (checkedChildren == 0 && partialChildren == 0) {
                         parent->setCheckState(0, Qt::Unchecked);
@@ -943,16 +948,26 @@ bool MainWindow::promptTaskSelectionDialog(
     actionRow->addStretch();
     layout->addLayout(actionRow);
 
-    connect(selectAllBtn, &QPushButton::clicked, tree, [tree]() {
+    auto applyToWholeTree = [&](Qt::CheckState state) {
+        syncingCheckState = true;
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
-            tree->topLevelItem(i)->setCheckState(0, Qt::Checked);
+            applyStateRecursively(applyStateRecursively, tree->topLevelItem(i), state);
         }
+        syncingCheckState = false;
         tree->viewport()->update();
+    };
+    connect(selectAllBtn, &QPushButton::clicked, tree, [&, applyToWholeTree]() {
+        applyToWholeTree(Qt::Checked);
     });
-    connect(clearAllBtn, &QPushButton::clicked, tree, [tree]() {
-        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
-            tree->topLevelItem(i)->setCheckState(0, Qt::Unchecked);
-        }
+    connect(clearAllBtn, &QPushButton::clicked, tree, [&, applyToWholeTree]() {
+        applyToWholeTree(Qt::Unchecked);
+    });
+
+    // Default to full selection for Product → Main Task → Sub Task export tree.
+    applyToWholeTree(Qt::Checked);
+    tree->expandAll();
+    QTimer::singleShot(0, tree, [tree]() {
+        tree->doItemsLayout();
         tree->viewport()->update();
     });
 

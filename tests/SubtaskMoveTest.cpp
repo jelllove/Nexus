@@ -1,6 +1,7 @@
 #include "app/MainWindow.h"
 #include "db/DatabaseManager.h"
 #include "ui/TaskCardDelegate.h"
+#include "ui/MarkdownPreviewDialog.h"
 #include <QDialogButtonBox>
 #include <QFocusEvent>
 #include <QLineEdit>
@@ -14,6 +15,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTreeWidget>
+#include <QTextBrowser>
 #include <QtTest>
 #include <functional>
 #include <memory>
@@ -777,6 +779,117 @@ private slots:
         const int destinationRow = model->rowCount();
         QVERIFY(model->moveRows({}, sourceRow, 1, {}, destinationRow));
         QVERIFY(model->rowForTaskId(other) < model->rowForTaskId(m_task));
+    }
+
+    void mergedExportRetainsPriorityStylesAndInputProductOrder()
+    {
+        ExportTaskItem first;
+        first.productName = "Z product";
+        first.title = "High\npriority";
+        first.priority = TaskPriority::Critical;
+        first.simpleDescription = "First line\nsecond line";
+        first.subtasks.append({"Waiting\nchild", TaskWorkStatus::Waiting, {}});
+        ExportTaskItem second;
+        second.productName = "A product";
+        second.title = "Empty parent";
+        second.priority = TaskPriority::Low;
+        const QString markdown = TaskExportService::buildMarkdown({first, second}, QDateTime::currentDateTime());
+        QVERIFY(markdown.indexOf("Z product") < markdown.indexOf("A product"));
+        QVERIFY(markdown.contains("High priority"));
+        QVERIFY(markdown.contains("[P0]"));
+        QVERIFY(markdown.contains("[P3]"));
+        QVERIFY(markdown.contains("background-color:"));
+        QVERIFY(markdown.contains("First line second line"));
+        QVERIFY(markdown.contains(Task::workStatusIcon(TaskWorkStatus::Waiting) + " Waiting child"));
+        QVERIFY(markdown.contains("\n\n\n---\n---\n\n\n"));
+        QCOMPARE(markdown.count("Selected Sub Tasks:"), 1);
+        QVERIFY(!markdown.contains("<details>"));
+        QVERIFY(!markdown.contains("[x]"));
+        QVERIFY(!markdown.contains("[ ]"));
+        QVERIFY(!markdown.contains("(none)"));
+    }
+
+    void mergedExportTreeSelectsAllChildrenAndPreviewsMovedOrder()
+    {
+        auto &db = DatabaseManager::instance();
+        QVERIFY(db.moveSubtask(m_second, m_destination, 0));
+        QVERIFY(db.addTask(m_product, "Empty parent") > 0);
+        QTimer dialogs;
+        int stage = 0;
+        connect(&dialogs, &QTimer::timeout, this, [&]() {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (!dialog) return;
+            if (stage == 0 && dialog->windowTitle() == "Export Tasks - Step 1/2") {
+                ++stage;
+                dialog->accept();
+            } else if (stage == 1 && dialog->windowTitle() == "Export Tasks - Step 2/2") {
+                ++stage;
+                auto *tree = dialog->findChild<QTreeWidget *>();
+                QVERIFY(tree);
+                QCOMPARE(tree->topLevelItemCount(), 2);
+                QTreeWidgetItem *destination = nullptr;
+                for (QTreeWidgetItemIterator it(tree); *it; ++it) {
+                    QCOMPARE((*it)->checkState(0), Qt::Checked);
+                    QVERIFY(!(*it)->text(0).contains("No Sub Task"));
+                    if ((*it)->text(0).contains("Destination main task")) destination = *it;
+                }
+                QVERIFY(destination);
+                QCOMPARE(destination->childCount(), 2);
+                QVERIFY(destination->child(0)->text(0).contains("Second subtask"));
+                QVERIFY(destination->child(1)->text(0).contains("Existing destination subtask"));
+                for (auto *button : dialog->findChildren<QPushButton *>()) {
+                    if (button->text() == "Clear All") button->click();
+                }
+                for (QTreeWidgetItemIterator it(tree); *it; ++it)
+                    QCOMPARE((*it)->checkState(0), Qt::Unchecked);
+                for (auto *button : dialog->findChildren<QPushButton *>()) {
+                    if (button->text() == "Select All") button->click();
+                }
+                for (QTreeWidgetItemIterator it(tree); *it; ++it)
+                    QCOMPARE((*it)->checkState(0), Qt::Checked);
+                destination->child(0)->setCheckState(0, Qt::Unchecked);
+                QCOMPARE(destination->checkState(0), Qt::PartiallyChecked);
+                destination->setCheckState(0, Qt::Unchecked);
+                destination->setCheckState(0, Qt::Checked);
+                QCOMPARE(destination->child(0)->checkState(0), Qt::Checked);
+                dialog->accept();
+            }
+        });
+        QTimer::singleShot(5000, &dialogs, [&]() {
+            dialogs.stop();
+            if (stage < 2) QTest::qFail("Export dialogs did not complete", __FILE__, __LINE__);
+            if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget()))
+                dialog->reject();
+        });
+        dialogs.start(10);
+        QVERIFY(QMetaObject::invokeMethod(m_window.get(), "previewTasksAsMarkdown"));
+        dialogs.stop();
+        QCOMPARE(stage, 2);
+        auto *preview = m_window->findChild<MarkdownPreviewDialog *>();
+        QVERIFY(preview);
+        const QString text = preview->findChild<QTextBrowser *>()->toPlainText();
+        QVERIFY(text.contains("Empty parent"));
+        QVERIFY(text.contains("[P2]"));
+        QVERIFY(text.indexOf("Second subtask") >= 0);
+        QVERIFY(text.indexOf("Second subtask") < text.indexOf("Existing destination subtask"));
+    }
+
+    void mergedMaintenancePreservesMovedData()
+    {
+        auto &db = DatabaseManager::instance();
+        QVERIFY(db.moveSubtask(m_second, m_destination));
+        const auto before = snapshot();
+        db.setSetting("db_last_compact_at", "");
+        db.scheduleWeeklyCompaction(7, 0);
+        QTRY_VERIFY_WITH_TIMEOUT(!db.getSetting("db_last_compact_at").isEmpty(), 10000);
+        QCOMPARE(snapshot(), before);
+        const QString lastRun = db.getSetting("db_last_compact_at");
+        db.scheduleWeeklyCompaction(7, 0);
+        QTest::qWait(30);
+        QCOMPARE(db.getSetting("db_last_compact_at"), lastRun);
+        QSqlQuery integrity("PRAGMA integrity_check");
+        QVERIFY(integrity.next());
+        QCOMPARE(integrity.value(0).toString(), "ok");
     }
 
     void systemMouseDrag_data()

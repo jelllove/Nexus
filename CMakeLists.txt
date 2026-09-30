@@ -10,6 +10,7 @@ set(CMAKE_AUTOUIC ON)
 # Find Qt6 components
 find_package(Qt6 REQUIRED COMPONENTS
     Core
+    Concurrent
     Gui
     Widgets
     Sql
@@ -96,7 +97,7 @@ if(BUILD_TESTING)
     list(REMOVE_ITEM UPDATE_UI_TEST_SOURCES src/main.cpp)
     add_executable(UpdateUiTest tests/UpdateUiTest.cpp ${UPDATE_UI_TEST_SOURCES} ${HEADERS} ${RESOURCES})
     target_include_directories(UpdateUiTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(UpdateUiTest PRIVATE Qt6::Widgets Qt6::Sql Qt6::Network
+    target_link_libraries(UpdateUiTest PRIVATE Qt6::Widgets Qt6::Sql Qt6::Network Qt6::Concurrent
         Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Test)
     set_target_properties(UpdateServiceTest UpdateUiTest PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
@@ -110,7 +111,7 @@ if(BUILD_TESTING)
         TIMEOUT 60)
     add_executable(SubtaskMoveTest tests/SubtaskMoveTest.cpp ${UPDATE_UI_TEST_SOURCES} ${HEADERS} ${RESOURCES})
     target_include_directories(SubtaskMoveTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(SubtaskMoveTest PRIVATE Qt6::Widgets Qt6::Sql Qt6::Network
+    target_link_libraries(SubtaskMoveTest PRIVATE Qt6::Widgets Qt6::Sql Qt6::Network Qt6::Concurrent
         Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Test)
     set_target_properties(SubtaskMoveTest PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
@@ -127,6 +128,7 @@ endif()
 # Link Qt6 libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
+    Qt6::Concurrent
     Qt6::Gui
     Qt6::Widgets
     Qt6::Sql

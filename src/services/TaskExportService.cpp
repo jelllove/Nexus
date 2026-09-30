@@ -1,4 +1,5 @@
 #include "TaskExportService.h"
+#include <QHash>
 #include <QMap>
 #include <QRegularExpression>
 #include <QTextStream>
@@ -12,6 +13,12 @@ QString normalizeHeading(const QString &value, const QString &fallback)
         return fallback;
     }
     return text;
+}
+
+QString normalizeLine(const QString &value, const QString &fallback = QString())
+{
+    const QString text = value.simplified();
+    return text.isEmpty() ? fallback : text;
 }
 
 TaskPriority normalizedPriority(TaskPriority priority)
@@ -62,10 +69,10 @@ QString mainTaskPriorityTitleHtml(TaskPriority priority,
 {
     const QColor bgColor = Task::priorityBackgroundColor(priority);
     const QColor accentColor = Task::priorityColor(priority);
-    const QString safeTitle = normalizeHeading(title, "📝 Untitled Task").toHtmlEscaped();
+    const QString safeTitle = normalizeLine(title, "📝 Untitled Task").toHtmlEscaped();
     const QString safeWorkIcon = workStatusIcon.trimmed().isEmpty()
         ? Task::workStatusIcon(TaskWorkStatus::NotStarted)
-        : workStatusIcon.trimmed();
+        : normalizeLine(workStatusIcon);
     return QString(
                "<span style=\"display:inline-block; background-color:%1; color:#2c3e50; "
                "padding:2px 8px; border-radius:6px;\">"
@@ -81,7 +88,7 @@ QString mainTaskPriorityTitleHtml(TaskPriority priority,
 QString subtaskStatusIcon(const ExportSubTaskItem &subtask)
 {
     if (!subtask.workStatusIcon.trimmed().isEmpty()) {
-        return subtask.workStatusIcon.trimmed();
+        return normalizeLine(subtask.workStatusIcon);
     }
     return Task::workStatusIcon(subtask.workStatus);
 }
@@ -128,24 +135,27 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
         return markdown;
     }
 
-    QMap<QString, QList<ExportTaskItem>> groupedProducts;
+    QHash<QString, QList<ExportTaskItem>> groupedProducts;
+    QList<QString> productOrder;
     for (const ExportTaskItem &item : tasks) {
         const QString productKey = normalizeHeading(item.productName, "📁 Unknown Product");
+        if (!groupedProducts.contains(productKey)) {
+            productOrder.append(productKey);
+        }
         groupedProducts[productKey].append(item);
     }
 
     bool hasPrintedProduct = false;
-    for (auto it = groupedProducts.cbegin(); it != groupedProducts.cend(); ++it) {
+    for (const QString &productName : productOrder) {
         if (hasPrintedProduct) {
             stream << "\n\n\n---\n---\n\n\n";
         }
         hasPrintedProduct = true;
 
-        const QString productName = it.key();
-        stream << "## 📚 " << productName << "\n\n";
+        stream << "## 📚 " << normalizeLine(productName, "📁 Unknown Product") << "\n\n";
 
         QMap<int, QList<ExportTaskItem>> groupedPriorities;
-        for (const ExportTaskItem &item : it.value()) {
+        for (const ExportTaskItem &item : groupedProducts[productName]) {
             const TaskPriority priority = normalizedPriority(item.priority);
             groupedPriorities[static_cast<int>(priority)].append(item);
         }
@@ -177,16 +187,16 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
                 const QString taskTitle = normalizeHeading(item.title, "📝 Untitled Task");
                 const QString workStatusText = item.workStatusText.trimmed().isEmpty()
                     ? QString("Not Started")
-                    : item.workStatusText.trimmed();
+                    : normalizeLine(item.workStatusText);
                 const QString workStatusIcon = item.workStatusIcon.trimmed().isEmpty()
                     ? QString::fromUtf8("⏯️")
-                    : item.workStatusIcon.trimmed();
+                    : normalizeLine(item.workStatusIcon);
 
                 stream << "- " << mainTaskPriorityTitleHtml(priority, workStatusIcon, taskTitle) << "\n";
                 stream << "  - **Status:** " << workStatusIcon << " " << workStatusText << "\n";
 
                 if (!item.simpleDescription.trimmed().isEmpty()) {
-                    stream << "  - 🧠 **AI Summary:** " << item.simpleDescription.trimmed() << "\n";
+                    stream << "  - 🧠 **AI Summary:** " << normalizeLine(item.simpleDescription) << "\n";
                 }
 
                 const QString previewText = fallbackSimpleDescription(item.contentHtml, 240);
@@ -197,7 +207,7 @@ QString TaskExportService::buildMarkdown(const QList<ExportTaskItem> &tasks, con
                 if (!item.subtasks.isEmpty()) {
                     stream << "  - 🪜 **Selected Sub Tasks:**\n";
                     for (const ExportSubTaskItem &subtask : item.subtasks) {
-                        const QString subTitle = normalizeHeading(subtask.title, "Untitled sub task");
+                        const QString subTitle = normalizeLine(subtask.title, "Untitled sub task");
                         stream << "    - " << subtaskStatusIcon(subtask) << " " << subTitle << "\n";
                     }
                 }
