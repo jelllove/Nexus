@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             platform: Windows
             qt-host: windows
             qt-arch: win64_msvc2022_64
@@ -28,7 +28,7 @@ jobs:
           - os: ubuntu-22.04
             platform: Linux
             qt-host: linux
-            qt-arch: gcc_64
+            qt-arch: linux_gcc_64
             cmake-options: ''
     runs-on: ${{ matrix.os }}
     steps:
@@ -61,7 +61,7 @@ jobs:
           modules: 'qtwebengine qtwebchannel qtpositioning'
 
       - name: Configure
-        run: cmake -S . -B build ${{ matrix.cmake-options }} -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+        run: cmake -S . -B build ${{ matrix.cmake-options }} -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT_DIR }}"
 
       - name: Build
         run: cmake --build build --config Release --parallel 2

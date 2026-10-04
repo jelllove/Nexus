@@ -112,7 +112,7 @@ resources/
   ```
 
 Qt's online installer or `aqtinstall` can supply Qt on all three platforms.
-For example, `aqt install-qt linux desktop 6.8.3 gcc_64 -m qtwebengine
+For example, `aqt install-qt linux desktop 6.8.3 linux_gcc_64 -m qtwebengine
 qtwebchannel qtpositioning` (use `mac desktop 6.8.3 clang_64` on macOS).
 
 ## Build

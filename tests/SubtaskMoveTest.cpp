@@ -126,8 +126,11 @@ class SubtaskMoveTest : public QObject
         QTimer::singleShot(0, this, []() {
             auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
             QVERIFY(box);
-            QCOMPARE(box->windowTitle(), "Move Sub Task");
+            const QString message = box->text();
+            const QMessageBox::Icon icon = box->icon();
             box->accept();
+            QCOMPARE(icon, QMessageBox::Warning);
+            QVERIFY(message.contains("could not"));
         });
     }
 
