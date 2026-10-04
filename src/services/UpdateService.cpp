@@ -1,4 +1,5 @@
 #include "UpdateService.h"
+#include "platform/UpdatePackage.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -108,13 +109,13 @@ void UpdateService::checkForUpdate(bool manual)
             return;
         }
 
-        // Find the installer asset (Nexus-Setup-*.exe)
         QString downloadUrl;
         QJsonArray assets = release["assets"].toArray();
         for (const QJsonValue &val : assets) {
             QJsonObject asset = val.toObject();
             QString name = asset["name"].toString();
-            if (name.contains("Nexus-Setup") && name.endsWith(".exe")) {
+            if (UpdatePackage::matchesAsset(name, UpdatePackage::currentPlatform(),
+                                            UpdatePackage::currentArchitecture())) {
                 downloadUrl = asset["browser_download_url"].toString();
                 break;
             }
@@ -141,7 +142,9 @@ void UpdateService::downloadAndInstall(const QString &downloadUrl)
     }
     QUrl url(downloadUrl);
     if (!url.isValid() || url.scheme() != "https" || url.host() != "github.com"
-        || !url.path().startsWith("/jelllove/Nexus/releases/download/")) {
+        || !url.path().startsWith("/jelllove/Nexus/releases/download/")
+        || !UpdatePackage::matchesAsset(url.fileName(), UpdatePackage::currentPlatform(),
+                                        UpdatePackage::currentArchitecture())) {
         m_notifiedVersion.clear();
         emit error("Invalid Nexus installer download URL");
         return;
@@ -176,7 +179,8 @@ void UpdateService::downloadAndInstall(const QString &downloadUrl)
             return;
         }
         const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-        QTemporaryFile file(QDir(tempDir).filePath("Nexus-Update-XXXXXX.exe"));
+        QTemporaryFile file(QDir(tempDir).filePath(
+            "Nexus-Update-XXXXXX" + UpdatePackage::extension(UpdatePackage::currentPlatform())));
         if (!file.open()) {
             m_notifiedVersion.clear();
             emit error("Failed to save installer: " + file.errorString());

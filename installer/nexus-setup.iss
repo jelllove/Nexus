@@ -2,10 +2,15 @@
 ; Requires Inno Setup 6
 
 #define MyAppName "Nexus"
-#define MyAppVersion "1.0.8"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.9"
+#endif
 #define MyAppPublisher "jelllove"
 #define MyAppURL "https://www.jelllove.com"
 #define MyAppExeName "Nexus.exe"
+#ifndef MyAppExePath
+  #define MyAppExePath MyAppExeName
+#endif
 #ifndef MyAppSourceDir
   #define MyAppSourceDir "..\dist"
 #endif
@@ -28,7 +33,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\{#MyAppExePath}
 CloseApplications=yes
 CloseApplicationsFilter=Nexus.exe
 
@@ -42,9 +47,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExePath}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExePath}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExePath}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

@@ -3,8 +3,11 @@
 #include "services/UpdateService.h"
 #include "ui/EditorPane.h"
 #include "ui/SettingsDialog.h"
+#include "platform/GlobalHotkey.h"
 #include <QAction>
 #include <QCheckBox>
+#include <QCloseEvent>
+#include <QDesktopServices>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -15,6 +18,16 @@
 #include <QtTest>
 #include <memory>
 
+class TestUrlHandler : public QObject
+{
+    Q_OBJECT
+public:
+    QUrl opened;
+    ~TestUrlHandler() override { QDesktopServices::unsetUrlHandler("file"); }
+public slots:
+    void openUrl(const QUrl &url) { opened = url; }
+};
+
 class UpdateUiTest : public QObject
 {
     Q_OBJECT
@@ -22,6 +35,15 @@ class UpdateUiTest : public QObject
     std::unique_ptr<MainWindow> m_window;
     int m_taskId = -1;
     int m_subtaskId = -1;
+
+    QString updateButtonText() const
+    {
+#ifdef Q_OS_WIN
+        return "Install now";
+#else
+        return "Open update";
+#endif
+    }
 
     void answerDialogs(const QStringList &answers)
     {
@@ -137,7 +159,7 @@ private slots:
         QSignalSpy quitting(qApp, &QCoreApplication::aboutToQuit);
         QTest::ignoreMessage(QtWarningMsg, qPrintable(
             QString("Failed to save subtask content: %1").arg(m_subtaskId)));
-        answerDialogs({"Install now", "OK"});
+        answerDialogs({updateButtonText(), "OK"});
         QVERIFY(QMetaObject::invokeMethod(m_window.get(), "onDownloadFinished",
                                           Q_ARG(QString, m_data.filePath("missing-installer.exe"))));
         QVERIFY(query.exec("PRAGMA query_only=OFF"));
@@ -149,10 +171,73 @@ private slots:
     void failedInstallerLaunchKeepsApplicationOpen()
     {
         QSignalSpy quitting(qApp, &QCoreApplication::aboutToQuit);
-        answerDialogs({"Install now", "OK"});
+        answerDialogs({updateButtonText(), "OK"});
         QVERIFY(QMetaObject::invokeMethod(m_window.get(), "onDownloadFinished",
                                           Q_ARG(QString, m_data.filePath("missing-installer.exe"))));
         QCOMPARE(quitting.count(), 0);
+    }
+
+    void closingWithoutTraySavesAndSaveFailureBlocksClose()
+    {
+        auto *tray = m_window->findChild<QSystemTrayIcon *>();
+        QVERIFY(tray);
+        tray->hide();
+        auto *editor = m_window->findChild<EditorPane *>();
+        editor->loadTask(m_taskId);
+        editor->findChild<EditorBridge *>()->setContent("<p>Save before closing</p>");
+        QSqlQuery query;
+        QVERIFY(query.exec("PRAGMA query_only=ON"));
+        QTest::ignoreMessage(QtWarningMsg, qPrintable(
+            QString("Failed to save task content: %1").arg(m_taskId)));
+        answerDialogs({"OK"});
+        QCloseEvent blocked;
+        QApplication::sendEvent(m_window.get(), &blocked);
+        QVERIFY(query.exec("PRAGMA query_only=OFF"));
+        QVERIFY(!blocked.isAccepted());
+        QCloseEvent allowed;
+        QApplication::sendEvent(m_window.get(), &allowed);
+        QVERIFY(allowed.isAccepted());
+        QCOMPARE(DatabaseManager::instance().getTask(m_taskId).content,
+                 "<p>Save before closing</p>");
+    }
+
+    void nonWindowsUpdateOpensPackageWithoutQuitting()
+    {
+#ifdef Q_OS_WIN
+        QSKIP("Windows uses an executable installer, not desktop URL handling.");
+#else
+        TestUrlHandler handler;
+        QDesktopServices::setUrlHandler("file", &handler, "openUrl");
+        auto *editor = m_window->findChild<EditorPane *>();
+        editor->loadTask(m_taskId);
+        editor->findChild<EditorBridge *>()->setContent("<p>Save before opening update</p>");
+        QTemporaryFile package(m_data.filePath("update-XXXXXX"));
+        QVERIFY(package.open());
+        const QString path = package.fileName();
+        package.close();
+        QSignalSpy quitting(qApp, &QCoreApplication::aboutToQuit);
+        answerDialogs({"Open update"});
+        QVERIFY(QMetaObject::invokeMethod(m_window.get(), "onDownloadFinished",
+                                          Q_ARG(QString, path)));
+#ifdef Q_OS_MACOS
+        QCOMPARE(handler.opened, QUrl::fromLocalFile(path));
+#else
+        QCOMPARE(handler.opened, QUrl::fromLocalFile(m_data.path()));
+#endif
+        QCOMPARE(quitting.count(), 0);
+        QCOMPARE(DatabaseManager::instance().getTask(m_taskId).content,
+                 "<p>Save before opening update</p>");
+#endif
+    }
+
+    void offscreenDesktopReportsHotkeyUnavailable()
+    {
+        if (QGuiApplication::platformName() != "offscreen")
+            QSKIP("This test requires the offscreen desktop used by CTest.");
+        auto &hotkey = GlobalHotkey::instance();
+        QVERIFY(!hotkey.registerHotkey());
+        QVERIFY(!hotkey.errorString().isEmpty());
+        QVERIFY(!GlobalHotkey::availabilityMessage().isEmpty());
     }
 
     void settingsDescribeIntervalAndPersistExistingKeys()

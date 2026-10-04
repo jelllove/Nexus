@@ -2,59 +2,245 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, agents/macos-support]
+    tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: Windows
+            qt-host: windows
+            qt-arch: win64_msvc2022_64
+            cmake-options: '-G "Visual Studio 17 2022" -A x64'
+          - os: macos-14
+            platform: macOS
+            qt-host: mac
+            qt-arch: clang_64
+            cmake-options: '-DCMAKE_OSX_ARCHITECTURES=arm64'
+          - os: ubuntu-22.04
+            platform: Linux
+            qt-host: linux
+            qt-arch: gcc_64
+            cmake-options: ''
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up MSVC runtime deployment environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Linux build and desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libxcb-cursor0 libxkbcommon-x11-0 libxcb-xinerama0 libnss3 libasound2 \
+            libxcomposite1 libxrandr2 libxtst6 libxdamage1 libgbm1 libfontconfig1 \
+            libdbus-1-3
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
-          host: 'windows'
+          host: ${{ matrix.qt-host }}
           target: 'desktop'
-          arch: 'win64_msvc2022_64'
+          arch: ${{ matrix.qt-arch }}
           modules: 'qtwebengine qtwebchannel qtpositioning'
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+        run: cmake -S . -B build ${{ matrix.cmake-options }} -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Test
+        env:
+          QTWEBENGINE_CHROMIUM_FLAGS: --disable-gpu
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexus-${{ matrix.platform }}-test-reports
+          path: |
+            build/*Test.txt
+            build/Testing/Temporary/LastTest.log
+
+      - name: Package with Qt runtime
+        run: cpack --config build/CPackConfig.cmake -C Release
+
+      - name: Build Windows installer from deployed runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path -LiteralPath $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+          cmake --install build --config Release --prefix "$PWD\build\stage"
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime deployment failed' }
+          $version = [regex]::Match((Get-Content CMakeLists.txt -Raw),
+            'project\(Nexus VERSION ([0-9.]+)').Groups[1].Value
+          if (!$version) { throw 'Application version is missing' }
+          & $iscc "/DMyAppVersion=$version" "/DMyAppSourceDir=$PWD\build\stage" `
+            "/O$PWD\build\packages" installer\nexus-setup.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer creation failed' }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Nexus-Windows
-          path: build/Release/Nexus.exe
+          name: Nexus-${{ matrix.platform }}
+          path: |
+            build/packages/*.zip
+            build/packages/*.dmg
+            build/packages/*.tar.gz
+            build/packages/*.exe
+          if-no-files-found: error
 
-  build-macos:
-    runs-on: macos-latest
+  verify-installer:
+    name: Verify ${{ matrix.platform }} installer and screenshots
+    needs: build
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macOS
+          - os: ubuntu-22.04
+            platform: Linux
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+      - uses: actions/setup-python@v5
         with:
-          version: '6.8.3'
-          host: 'mac'
-          target: 'desktop'
-          arch: 'clang_64'
-          modules: 'qtwebengine qtwebchannel qtpositioning'
+          python-version: '3.12'
 
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+      - name: Download native package
+        uses: actions/download-artifact@v4
+        with:
+          name: Nexus-${{ matrix.platform }}
+          path: installer-package
 
-      - name: Build
-        run: cmake --build build --config Release
+      - name: Install Linux desktop runtime (no development Qt)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth fluxbox dbus-x11 libxcb-cursor0 \
+            libxkbcommon-x11-0 libxcb-xinerama0 libnss3 libasound2 libxcomposite1 \
+            libxrandr2 libxtst6 libxdamage1 libgbm1 libfontconfig1 libdbus-1-3 \
+            libgl1 libegl1 fonts-dejavu-core libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-image0 libxcb-render-util0 libxcb-randr0 libxcb-xfixes0 \
+            libxcb-sync1 libxcb-xkb1
 
-      - name: Upload artifact
+      - name: Verify installed macOS DMG and capture screen
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(installer-package/*.dmg)
+          test "${#packages[@]}" -eq 1
+          python ci/verify_installer.py --package "${packages[0]}" --evidence installer-evidence
+
+      - name: Verify installed Linux archive and capture virtual desktop
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(installer-package/*.tar.gz)
+          test "${#packages[@]}" -eq 1
+          xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- \
+            bash -c 'set -euo pipefail
+              fluxbox > "$RUNNER_TEMP/nexus-window-manager.log" 2>&1 &
+              wm_pid=$!
+              trap "kill $wm_pid 2>/dev/null || true" EXIT
+              python ci/verify_installer.py --package "$1" --evidence installer-evidence' \
+            bash "${packages[0]}"
+
+      - name: Collect window manager diagnostics
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p installer-evidence
+          if test -f "$RUNNER_TEMP/nexus-window-manager.log"; then
+            cp "$RUNNER_TEMP/nexus-window-manager.log" installer-evidence/window-manager.log
+          fi
+
+      - name: Upload installer screenshots and diagnostics
+        id: evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Nexus-macOS
-          path: build/Nexus.app
+          name: Nexus-${{ matrix.platform }}-installer-evidence
+          path: installer-evidence/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Link screenshot evidence in workflow summary
+        if: always()
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          EVIDENCE_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          {
+            echo "## ${PLATFORM} installer verification"
+            if test -n "${EVIDENCE_URL}"; then
+              echo "Download [screenshots and diagnostics](${EVIDENCE_URL})."
+            else
+              echo 'No evidence artifact was produced; inspect the failed job logs.'
+            fi
+            echo 'The artifact contains `screenshots/app-window.png`, `screenshots/desktop.png`,'
+            echo '`screenshots/report.json`, `verification.json`, and install/application logs.'
+            echo 'A failed job may have logs only; screenshots are evidence only when verification passes.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Publish verified release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, verify-installer]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Nexus-*
+          path: release-input
+
+      - name: Prepare checked release assets and screenshots
+        run: python ci/prepare_release.py --input release-input --output release-assets --tag "${{ github.ref_name }}"
+
+      - name: Create release after native verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" --verify-tag --title "Nexus $RELEASE_TAG" \
+            --notes-file "docs/release-notes-${RELEASE_TAG}.md" release-assets/*

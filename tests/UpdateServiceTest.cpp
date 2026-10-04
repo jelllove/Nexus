@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QSysInfo>
 #include <QTimer>
 #include <QtTest>
 #include <cstring>
@@ -67,8 +68,18 @@ protected:
 
 static QString installerUrl(const QString &version = "v1.0.8")
 {
-    return QString("https://github.com/jelllove/Nexus/releases/download/%1/Nexus-Setup-%1-x64.exe")
-        .arg(version);
+    QString architecture = QSysInfo::currentCpuArchitecture();
+    if (architecture == "x86_64") architecture = "x64";
+    if (architecture == "aarch64") architecture = "arm64";
+#ifdef Q_OS_WIN
+    const QString name = "Nexus-Setup-" + version + "-" + architecture + ".exe";
+#elif defined(Q_OS_MACOS)
+    const QString name = "Nexus-" + version + "-macOS-" + architecture + ".dmg";
+#else
+    const QString name = "Nexus-" + version + "-Linux-" + architecture + ".tar.gz";
+#endif
+    return QString("https://github.com/jelllove/Nexus/releases/download/%1/%2")
+        .arg(version, name);
 }
 
 static QByteArray releaseData(const QString &version)
@@ -77,7 +88,7 @@ static QByteArray releaseData(const QString &version)
         {"tag_name", version},
         {"body", "Test release notes"},
         {"assets", QJsonArray{QJsonObject{
-            {"name", "Nexus-Setup-" + version + "-x64.exe"},
+            {"name", QUrl(installerUrl(version)).fileName()},
             {"browser_download_url", installerUrl(version)}
         }}}
     }).toJson();
@@ -264,6 +275,13 @@ private slots:
         QVERIFY(!service.isBusy());
         QCOMPARE(downloaded.count(), 1);
         const QString path = downloaded.first().first().toString();
+#ifdef Q_OS_WIN
+        QVERIFY(path.endsWith(".exe"));
+#elif defined(Q_OS_MACOS)
+        QVERIFY(path.endsWith(".dmg"));
+#else
+        QVERIFY(path.endsWith(".tar.gz"));
+#endif
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.readAll(), payload);
@@ -311,6 +329,36 @@ private slots:
         QSignalSpy errors(&service, &UpdateService::error);
         QTest::ignoreMessage(QtWarningMsg, "Update: Invalid Nexus installer download URL");
         service.downloadAndInstall("http://example.com/setup.exe");
+        QCOMPARE(errors.count(), 1);
+        QVERIFY(network.requests.isEmpty());
+    }
+
+    void refusesWrongPlatformOrArchitecture()
+    {
+        TestNetwork network;
+        UpdateService service(&network);
+        QSignalSpy available(&service, &UpdateService::updateAvailable);
+        QSignalSpy errors(&service, &UpdateService::error);
+        QJsonObject release = QJsonDocument::fromJson(releaseData("v1.0.8")).object();
+        release["assets"] = QJsonArray{
+            QJsonObject{{"name", "Nexus-Setup-v1.0.8-other.exe"},
+                        {"browser_download_url", "https://github.com/jelllove/Nexus/releases/download/v1.0.8/Nexus-Setup-v1.0.8-other.exe"}}
+        };
+        service.checkForUpdate();
+        QTest::ignoreMessage(QtWarningMsg, "Update: No installer found in release v1.0.8");
+        network.reply->finish(QJsonDocument(release).toJson());
+        QCOMPARE(available.count(), 0);
+        QCOMPARE(errors.count(), 1);
+    }
+
+    void refusesWrongPackageBeforeDownloading()
+    {
+        TestNetwork network;
+        UpdateService service(&network);
+        QSignalSpy errors(&service, &UpdateService::error);
+        QTest::ignoreMessage(QtWarningMsg, "Update: Invalid Nexus installer download URL");
+        service.downloadAndInstall(
+            "https://github.com/jelllove/Nexus/releases/download/v1.0.8/Nexus-Setup-v1.0.8-other.exe");
         QCOMPARE(errors.count(), 1);
         QVERIFY(network.requests.isEmpty());
     }

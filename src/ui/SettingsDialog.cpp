@@ -1,6 +1,7 @@
 #include "SettingsDialog.h"
 #include "db/DatabaseManager.h"
 #include "services/AIService.h"
+#include "platform/GlobalHotkey.h"
 #include <memory>
 #include <QVBoxLayout>
 #include <QFormLayout>
@@ -86,7 +87,12 @@ void SettingsDialog::setupUi()
     m_hotkeyEdit->setReadOnly(true);
     hotkeyLayout->addRow("Show/Hide Hotkey:", m_hotkeyEdit);
 
-    QLabel *hotkeyNote = new QLabel("Default: Ctrl+Shift+N", this);
+    const QString unavailable = GlobalHotkey::instance().errorString().isEmpty()
+        ? GlobalHotkey::availabilityMessage() : GlobalHotkey::instance().errorString();
+    QLabel *hotkeyNote = new QLabel(unavailable.isEmpty()
+        ? "Default: Ctrl+Shift+N (Control+Shift+N on macOS)" : unavailable, this);
+    hotkeyNote->setWordWrap(true);
+    m_hotkeyEdit->setEnabled(unavailable.isEmpty());
     hotkeyNote->setStyleSheet("color: #7f8c8d; font-size: 11px;");
     hotkeyLayout->addRow(hotkeyNote);
 
@@ -106,6 +112,13 @@ void SettingsDialog::setupUi()
         "Help > Check for Updates works even when automatic checks are disabled.", this);
     updateNote->setWordWrap(true);
     updateLayout->addRow(updateNote);
+#ifndef Q_OS_WIN
+    auto *installNote = new QLabel(
+        "Updates are installed manually. Nexus opens the downloaded package/folder "
+        "and stays running; quit Nexus before replacing the application.", this);
+    installNote->setWordWrap(true);
+    updateLayout->addRow(installNote);
+#endif
 
     mainLayout->addWidget(updateGroup);
 

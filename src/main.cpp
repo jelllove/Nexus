@@ -5,9 +5,11 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QMessageBox>
+#include <QSystemTrayIcon>
 #include <QtWebEngineWidgets/QWebEngineView>
 #include "app/MainWindow.h"
 #include "db/DatabaseManager.h"
+#include "platform/InstallerSmoke.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -21,6 +23,24 @@ int main(int argc, char *argv[])
     app.setApplicationName("Nexus");
     app.setApplicationVersion(APP_VERSION);
     app.setOrganizationName("Nexus");
+
+    const QStringList arguments = app.arguments();
+    const int smokeArgument = arguments.indexOf("--installer-smoke");
+    if (smokeArgument >= 0) {
+        if (arguments.size() != 3 || smokeArgument != 1 || arguments.at(2).isEmpty()) {
+            qCritical("Usage: Nexus --installer-smoke <new-output-directory>");
+            return 1;
+        }
+        InstallerSmoke smoke(arguments.at(2));
+        if (!smoke.prepare()) return 1;
+        app.setQuitOnLastWindowClosed(false);
+        MainWindow mainWindow;
+        mainWindow.show();
+        mainWindow.raise();
+        mainWindow.activateWindow();
+        smoke.start(&mainWindow);
+        return app.exec();
+    }
 
     // Single-instance guard: prevent multiple Nexus processes
     QSharedMemory singleInstanceGuard("NexusTaskManagerSingleInstance");
@@ -36,8 +56,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    // Don't quit when last window is closed (we minimize to tray)
-    app.setQuitOnLastWindowClosed(false);
+    app.setQuitOnLastWindowClosed(!QSystemTrayIcon::isSystemTrayAvailable());
 
     // Initialize database (use custom path from QSettings if set)
     QSettings settings;
@@ -75,6 +94,17 @@ int main(int argc, char *argv[])
     mainWindow.show();
     mainWindow.raise();
     mainWindow.activateWindow();
+
+#ifdef Q_OS_MACOS
+    QObject::connect(&app, &QGuiApplication::applicationStateChanged, &mainWindow,
+                     [&mainWindow](Qt::ApplicationState state) {
+        if (state == Qt::ApplicationActive && !mainWindow.isVisible()) {
+            mainWindow.show();
+            mainWindow.raise();
+            mainWindow.activateWindow();
+        }
+    });
+#endif
 
     // IPC server: listen for "show" messages from other instances
     QLocalServer::removeServer(SOCKET_NAME);

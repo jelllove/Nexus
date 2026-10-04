@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+bin_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+prefix=$(CDPATH= cd -- "$bin_dir/.." && pwd)
+export LD_LIBRARY_PATH="$prefix/@CMAKE_INSTALL_LIBDIR@${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$bin_dir/Nexus" "$@"

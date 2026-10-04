@@ -3,8 +3,36 @@
 A desktop task management application with a 3-pane layout inspired by OneNote, built with C++17 and Qt 6.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
+![macOS](https://img.shields.io/badge/platform-macOS-blue)
+![Linux](https://img.shields.io/badge/platform-Linux-blue)
 ![Qt 6.8](https://img.shields.io/badge/Qt-6.8.3-green)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-orange)
+
+## Download and install
+
+Download native packages from the
+[primary releases](https://github.com/jelllove/Nexus/releases).
+An access-controlled mirror is published to
+[qinqingxu/Nexus](https://github.com/qinqingxu/Nexus/releases) using the same
+verified commit and assets.
+
+### v1.0.9 packages
+
+| Platform | Release asset | Installation |
+| --- | --- | --- |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.9-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.9-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.9-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Linux x64 | `Nexus-1.0.9-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+
+Do not extract only the executable: the Qt runtime and WebEngine resources are
+required. Intel macOS and Linux ARM64 can be built from source with matching Qt
+libraries but are not included in the current release matrix. macOS packages
+are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
+
+Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
+and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
+notes, not personal data. See [v1.0.9 release notes](docs/release-notes-v1.0.9.md).
 
 ## Features
 
@@ -18,11 +46,11 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 - **Priority Management** — Click the priority badge or right-click to change task priority; tasks auto-sort by priority then due date
 - **Active / Archived Toggle** — Quick-switch between active and archived tasks with toggle buttons
 - **Product Ordering & Archive** — Drag to reorder products, archive/reactivate products, and expand archived products below the active list
-- **System Tray** — Minimize to tray; restore with a click
-- **Global Hotkey** — Win32 `RegisterHotKey` to summon the window from anywhere
+- **System Tray** — Minimize to tray when available; otherwise save and exit on close
+- **Global Hotkey** — Control+Shift+N using Win32, macOS Carbon, or Linux X11; native Wayland hotkeys are not supported
 - **GitHub Release Auto-Update** — Checks on startup and every 2 hours while running (including in the system tray), optionally downloads updates automatically, and asks before saving the current note and launching the installer
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
-- **Image Support** — Paste or drag images into the editor; stored locally in AppData
+- **Image Support** — Paste or drag images into the editor; stored locally in the platform's application-data directory
 - **Content History** — Automatic snapshots for undo/redo support
 - **Markdown Export** — Export selected Active tasks via Product → Main Task → Sub Task selection, optional AI one-line summaries with extra confirmation, progress dialog with logs/cancel, and a nested pure-Markdown tree output
 - **Markdown Preview** — Reuse the same selection/summarization pipeline and open a non-modal preview window with `Copy Markdown`, `Copy HTML`, and `Save As .md`
@@ -39,13 +67,15 @@ src/
 │                  EditorPane, SearchBar, SettingsDialog, MarkdownPreviewDialog
 ├── editor/        EditorBridge (C++ ↔ JS via QWebChannel)
 ├── services/      AIService, ImageManager
-└── platform/      GlobalHotkey (Win32)
+└── platform/      GlobalHotkey (Win32/Carbon/X11), UpdatePackage
 
 resources/
 └── editor/        TipTap HTML/CSS/JS bundle
 ```
 
 ## Prerequisites
+
+### Windows
 
 - **Windows 10/11**
 - **Visual Studio 2022** (MSVC v14.44+)
@@ -57,9 +87,37 @@ resources/
   ```
 - **CMake 3.21+** (bundled with VS2022)
 
+### macOS
+
+- macOS 12+ and Xcode Command Line Tools (`xcode-select --install`).
+- Qt 6.8.3 for macOS (`clang_64`), including Qt WebEngine, WebChannel and Qt Test.
+- CMake 3.21+.
+- Select an architecture supported by the installed Qt libraries (`arm64` on
+  Apple Silicon, `x86_64` on Intel). A universal build requires universal Qt.
+
+### Linux
+
+- Ubuntu 22.04+ is the reference build environment; other distributions require
+  compatible system libraries. This is not a universal AppImage.
+- GCC/Clang with C++17, CMake 3.21+, Qt 6.8.3 (`gcc_64`) including WebEngine,
+  WebChannel and Qt Test.
+- X11 development headers are required for the hotkey backend, even when the
+  app is run under Wayland. Install build/runtime dependencies on Ubuntu:
+
+  ```sh
+  sudo apt-get install build-essential cmake libx11-dev libgl1-mesa-dev \
+    libegl1-mesa-dev libxcb-cursor0 libxkbcommon-x11-0 libxcb-xinerama0 \
+    libnss3 libasound2 libxcomposite1 libxrandr2 libxtst6 libxdamage1 \
+    libgbm1 libfontconfig1 libdbus-1-3
+  ```
+
+Qt's online installer or `aqtinstall` can supply Qt on all three platforms.
+For example, `aqt install-qt linux desktop 6.8.3 gcc_64 -m qtwebengine
+qtwebchannel qtpositioning` (use `mac desktop 6.8.3 clang_64` on macOS).
+
 ## Build
 
-### Quick Build (Recommended)
+### Windows quick build
 
 Double-click or run from a terminal:
 
@@ -70,6 +128,8 @@ build.bat
 This will configure, build, deploy Qt DLLs, and package everything into the `dist/` directory.
 
 ### Manual Build
+
+Windows:
 
 ```bash
 # Configure
@@ -82,13 +142,54 @@ cmake --build build --config Release
 C:/Qt/6.8.3/msvc2022_64/bin/windeployqt6.exe build/Release/Nexus.exe
 ```
 
+macOS/Linux (replace `QT_PREFIX` with the installed Qt directory):
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+  -DCMAKE_PREFIX_PATH="$QT_PREFIX"
+cmake --build build --config Release --parallel 2
+export PATH="$QT_PREFIX/bin:$PATH"
+ctest --test-dir build -C Release --output-on-failure
+```
+
+On macOS, optionally pass `-DCMAKE_OSX_ARCHITECTURES=arm64` or `x86_64`.
+To deploy Qt and create a distributable package on any platform:
+
+```sh
+cpack --config build/CPackConfig.cmake -C Release
+```
+
+Packages are written to `build/packages`: Windows ZIP (portable deployment),
+macOS DMG, Linux tar.gz. Windows `.exe` installers still use the existing
+release tooling. CMake/CPack deploy the Qt libraries, plugins, WebEngine helper
+and resources rather than shipping only the application executable.
+macOS builds are not Developer ID signed/notarized; public distribution
+requires a separate signing workflow. Only install packages from a trusted source.
+
 ## Run
+
+Windows quick-build output:
 
 ```
 dist\Nexus.exe
 ```
 
-The database (`nexus.db`) is stored in `%APPDATA%\Nexus\Nexus\` by default.
+macOS: `open build/Nexus.app`, or copy the packaged application into Applications.
+Linux: `./build/Nexus` while developing with Qt installed; after extracting the
+package, run `./bin/nexus-launch` from the extracted package directory. The
+launcher resolves bundled libraries relative to its own location.
+The portable Windows ZIP contains `Nexus.exe` at its root, preserving the
+existing Windows installation layout for upgrades and shortcuts.
+
+The database (`nexus.db`) uses Qt's application-data location by default:
+
+- Windows: `%APPDATA%\Nexus\Nexus\`
+- macOS: `~/Library/Application Support/Nexus/Nexus/`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/Nexus/Nexus/`
+
+Custom database paths and existing settings remain supported. See
+[cross-platform design and acceptance criteria](docs/cross-platform.md) for
+platform boundaries, deployment decisions, and verification limitations.
 
 ## Moving subtasks
 
@@ -132,9 +233,28 @@ Before trying a new local build, allow pending edits to autosave, then use
 - **Help > Check for Updates** also works when automatic checks are disabled.
 - Checks and downloads cannot overlap. Background errors are logged and shown in the status bar, not an error popup; the next scheduled check can retry.
 - The same release is not repeatedly prompted during a session. Manual checks can retry a dismissed update.
-- Automatic download does not mean automatic shutdown: **Install now** saves the current task or subtask before launching the installer. If saving or launching fails, Nexus stays open.
+- Automatic download does not mean automatic shutdown: on Windows, **Install now** saves the current note before launching the installer and quitting. On macOS/Linux, **Open update** saves the note, opens the DMG/folder, and keeps Nexus running. Quit Nexus before manually installing the replacement. Save/open failures leave Nexus open.
 - Choose **Later** to keep working; use **Help > Check for Updates** to reopen the downloaded update without downloading it again during the same session.
-- Checking requires Nexus to be running and Windows awake. This is not a Windows background service, and the installer may still require UAC confirmation.
+- Checking requires Nexus to be running and the computer awake. This is not a background service; the Windows installer may require UAC confirmation.
+
+Updates only select matching OS/CPU packages. Supported release asset names:
+
+- Windows: `Nexus-Setup-v<version>-x64.exe` (or `arm64`)
+- macOS: `Nexus-<version>-macOS-x64.dmg` (or `arm64`, `universal`)
+- Linux: `Nexus-<version>-Linux-x64.tar.gz` (or `arm64`)
+
+If a release has no matching package, the updater reports an error instead of
+downloading a Windows installer on another OS. CI produces packages, but does
+not publish releases.
+
+## Desktop integration
+
+The global shortcut is **Control+Shift+N**, including on macOS (not Command).
+On Wayland, Settings explains the limitation; use your desktop's shortcut
+settings to launch Nexus, which asks an already-running instance to show itself.
+When no tray is available, closing saves the active note and exits rather than
+leaving an inaccessible background process. macOS can restore a hidden window
+when the application is activated from the Dock.
 
 ## Tests
 
@@ -142,11 +262,91 @@ With the Qt Test component installed, configure with `-DBUILD_TESTING=ON`, build
 then run `ctest --test-dir build -C Release --output-on-failure`.
 On Windows, add your Qt `bin` directory to `PATH` before running tests.
 Test reports are saved in `build/UpdateServiceTest.txt`, `build/UpdateUiTest.txt`
-and `build/SubtaskMoveTest.txt`; test executables are kept separately under
+and `build/SubtaskMoveTest.txt`, plus `build/UpdatePackageTest.txt`; test executables are kept separately under
 `build/tests`. The subtask suite uses an isolated temporary database and covers
 ordering, reparenting, field preservation, rollback, the destination picker,
 mouse dragging, drop indicators, cancellation, edge scrolling, editor saves
 and selection.
+
+CI runs the Qt and installer-helper suites, build and packaging on Windows, macOS and Ubuntu.
+Package-selection unit tests cover all three platforms even on a single host.
+Native hotkey registration, Dock activation and packaged launches still require
+platform-native desktop smoke tests. The offscreen suites do not simulate hotkeys
+or Dock activation; installed-package CI now checks native packaged launches.
+
+## Installer verification and screenshots
+
+The [Build workflow](.github/workflows/build.yml) runs on pushes to `main` and
+`agents/macos-support`, PRs targeting `main`, and manual **Run workflow**.
+After packaging, separate **Verify macOS/Linux installer and screenshots** jobs
+download the generated artifacts onto fresh runners with no development Qt
+installation:
+
+- **macOS:** mount the DMG read-only, copy `Nexus.app` into a clean directory,
+  unmount it, and launch the installed application.
+- **Linux:** extract the tar.gz safely, run `bin/nexus-launch` under a
+  1600x1000 Xvfb desktop with Fluxbox and D-Bus.
+- Both use synthetic notes in an isolated database, disable update requests,
+  verify actual editor DOM rendering and note saving, then capture screenshots.
+  Missing/blank captures, failed startup/render/save and timeouts fail the job.
+
+To review captures, open **GitHub Actions > Build > the run > Artifacts** and
+download:
+
+- `Nexus-macOS-installer-evidence`
+- `Nexus-Linux-installer-evidence`
+
+Each artifact includes `screenshots/app-window.png`, `screenshots/desktop.png`,
+`screenshots/report.json`, `verification.json`, `install.log`, and
+`application.log`. The workflow summary links these downloads. Evidence is kept
+for **14 days**, including diagnostics on failure; unsuccessful runs may not
+have screenshots. Linux captures show a virtual desktop, not a physical monitor.
+These checks do not exercise Gatekeeper prompts, signing/notarization, DEB/RPM
+installers or native hotkeys.
+
+The [installer verifier](ci/verify_installer.py) requires Python 3.12+ on native
+macOS/Linux hosts. Run it inside an existing desktop session (or `xvfb-run` on
+Linux):
+
+```sh
+python ci/verify_installer.py --package path/to/Nexus-package.dmg \
+  --evidence installer-evidence
+```
+
+Use the `.tar.gz` path on Linux. The evidence directory must not already exist.
+For a direct smoke capture using an installed executable:
+
+```sh
+Nexus --installer-smoke /absolute/path/to/new-capture-directory
+```
+
+This explicit verification mode bypasses normal single-instance IPC and user
+settings/database paths; normal application startup is unchanged. It exits
+after screenshots or fails after at most 60 seconds of readiness checks.
+Python helper/CLI regressions are part of the ordinary CTest command; Python
+3.12+ is required when `BUILD_TESTING=ON`.
+
+## Publishing a release
+
+The primary repository is `jelllove/Nexus`; `qinqingxu/Nexus` is a private mirror.
+Feature work is pushed on `agents/macos-support` without rewriting `main`.
+Use a new version tag only after the branch's native build and installer
+verification jobs pass. A tag must match the CMake application version.
+
+```sh
+git push origin agents/macos-support
+# After the branch workflow passes:
+git tag -a v1.0.9 -m "Nexus v1.0.9"
+git push origin v1.0.9
+```
+
+The tag workflow builds all three platforms, verifies installed macOS/Linux
+packages and screenshots, creates the Windows Inno Setup installer from the
+deployed runtime, and publishes a GitHub release only after these gates pass.
+Missing packages/evidence or a version mismatch block publication. Mirror
+releases reuse these verified assets rather than claiming a second validation.
+The legacy `release.bat` is Windows-only; the CI tag workflow is the
+cross-platform release path.
 
 On an interactive Windows desktop, the `systemMouseDrag` cases additionally use
 Windows `SendInput` and system cursor movement, rather than direct Qt widget

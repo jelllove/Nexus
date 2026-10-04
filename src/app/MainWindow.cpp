@@ -28,6 +28,7 @@
 #include <QLabel>
 #include <QFileDialog>
 #include <QFile>
+#include <QFileInfo>
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QDir>
@@ -37,10 +38,6 @@
 #include <QSignalBlocker>
 #include <QBrush>
 #include <memory>
-
-#ifdef Q_OS_WIN
-#include <windows.h>
-#endif
 
 #ifndef APP_GIT_COMMIT
 #define APP_GIT_COMMIT "unknown"
@@ -230,7 +227,11 @@ void MainWindow::setupTrayIcon()
     connect(quitAction, &QAction::triggered, qApp, &QApplication::quit);
 
     m_trayIcon->setContextMenu(trayMenu);
-    m_trayIcon->show();
+    if (QSystemTrayIcon::isSystemTrayAvailable()) {
+        m_trayIcon->show();
+    } else {
+        qWarning() << "System tray unavailable; closing the Nexus window will exit.";
+    }
 
     connect(m_trayIcon, &QSystemTrayIcon::activated,
             this, &MainWindow::onTrayActivated);
@@ -238,28 +239,30 @@ void MainWindow::setupTrayIcon()
 
 void MainWindow::setupGlobalHotkey()
 {
-#ifdef Q_OS_WIN
-    // Default: Ctrl+Shift+N
-    bool ok = GlobalHotkey::instance().registerHotkey(
-        MOD_CONTROL | MOD_SHIFT, 'N');
+    auto &hotkey = GlobalHotkey::instance();
+    const bool ok = hotkey.registerHotkey();
 
     if (ok) {
         connect(&GlobalHotkey::instance(), &GlobalHotkey::hotkeyPressed,
                 this, &MainWindow::onHotkeyPressed);
         statusBar()->showMessage("Global hotkey registered: Ctrl+Shift+N", 3000);
     } else {
-        statusBar()->showMessage("Failed to register global hotkey", 3000);
+        qWarning().noquote() << hotkey.errorString();
+        statusBar()->showMessage(hotkey.errorString(), 10000);
     }
-#endif
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    // Minimize to tray instead of closing
-    if (m_trayIcon->isVisible()) {
+    if (QSystemTrayIcon::isSystemTrayAvailable() && m_trayIcon->isVisible()) {
         hide();
         event->ignore();
+    } else if (!m_editorPane->saveCurrentContent()) {
+        QMessageBox::warning(this, "Close Deferred",
+                             "The current note could not be saved. Nexus will stay open.");
+        event->ignore();
     } else {
+        qApp->setQuitOnLastWindowClosed(true);
         event->accept();
     }
 }
@@ -1216,7 +1219,7 @@ void MainWindow::onUpdateAvailable(const QString &latestVersion,
                 "Current version: v%1\n"
                 "Latest version: %2\n\n"
                 "%3\n\n"
-                "Would you like to download and install the update?")
+                "Would you like to download the update?")
             .arg(qApp->applicationVersion(), latestVersion, notes),
         QMessageBox::Yes | QMessageBox::No);
     m_updatePromptOpen = false;
@@ -1240,11 +1243,27 @@ void MainWindow::onDownloadFinished(const QString &installerPath)
     m_pendingInstallerPath = installerPath;
     if (m_updatePromptOpen) return;
     m_updatePromptOpen = true;
+#ifdef Q_OS_WIN
+    const QString promptText =
+        "The update has been downloaded. Install it now?\n\n"
+        "Nexus will save the current note and close after launching the installer.";
+    const QString buttonText = "Install now";
+#elif defined(Q_OS_MACOS)
+    const QString promptText =
+        "The update has been downloaded. Open the disk image now?\n\n"
+        "Nexus will save the current note and stay open. Quit Nexus before replacing "
+        "the application in Applications.";
+    const QString buttonText = "Open update";
+#else
+    const QString promptText =
+        "The update has been downloaded. Open its folder now?\n\n"
+        "Nexus will save the current note and stay open. Quit Nexus, then extract "
+        "the archive into a new folder and run its launcher.";
+    const QString buttonText = "Open update";
+#endif
     QMessageBox prompt(QMessageBox::Information, "Update Ready",
-                       "The update has been downloaded. Install it now?\n\n"
-                       "Nexus will save the current note and close after launching the installer.",
-                       QMessageBox::NoButton, this);
-    QPushButton *installButton = prompt.addButton("Install now", QMessageBox::AcceptRole);
+                       promptText, QMessageBox::NoButton, this);
+    QPushButton *installButton = prompt.addButton(buttonText, QMessageBox::AcceptRole);
     QPushButton *laterButton = prompt.addButton("Later", QMessageBox::RejectRole);
     prompt.setDefaultButton(laterButton);
     prompt.setEscapeButton(laterButton);
@@ -1262,13 +1281,25 @@ void MainWindow::onDownloadFinished(const QString &installerPath)
         return;
     }
 
-    statusBar()->showMessage("Launching installer...");
-    bool started = QProcess::startDetached(installerPath, QStringList());
+    statusBar()->showMessage("Opening update...");
+#ifdef Q_OS_WIN
+    const bool started = QProcess::startDetached(installerPath, QStringList());
+#elif defined(Q_OS_MACOS)
+    const bool started = QFile::exists(installerPath)
+        && QDesktopServices::openUrl(QUrl::fromLocalFile(installerPath));
+#else
+    const bool started = QFile::exists(installerPath)
+        && QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(installerPath).absolutePath()));
+#endif
     if (started) {
+#ifdef Q_OS_WIN
         qApp->quit();
+#else
+        statusBar()->showMessage("Update opened. Quit Nexus before installing the new version.", 10000);
+#endif
     } else {
         QMessageBox::warning(this, "Update Error",
-            "Failed to launch the installer.\n"
-            "The installer was saved to:\n" + installerPath);
+            "Failed to open the update.\n"
+            "The update was saved to:\n" + installerPath);
     }
 }
