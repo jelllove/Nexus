@@ -146,7 +146,7 @@ jobs:
           sudo apt-get install -y xvfb xauth fluxbox dbus-x11 libxcb-cursor0 \
             libxkbcommon-x11-0 libxcb-xinerama0 libnss3 libasound2 libxcomposite1 \
             libxrandr2 libxtst6 libxdamage1 libgbm1 libfontconfig1 libdbus-1-3 \
-            libgl1 libegl1 fonts-dejavu-core libxcb-icccm4 libxcb-keysyms1 \
+            libgl1 libegl1 libopengl0 fonts-dejavu-core libxcb-icccm4 libxcb-keysyms1 \
             libxcb-image0 libxcb-render-util0 libxcb-randr0 libxcb-xfixes0 \
             libxcb-sync1 libxcb-xkb1
 

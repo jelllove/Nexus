@@ -108,7 +108,7 @@ resources/
   sudo apt-get install build-essential cmake libx11-dev libgl1-mesa-dev \
     libegl1-mesa-dev libxcb-cursor0 libxkbcommon-x11-0 libxcb-xinerama0 \
     libnss3 libasound2 libxcomposite1 libxrandr2 libxtst6 libxdamage1 \
-    libgbm1 libfontconfig1 libdbus-1-3
+    libgbm1 libfontconfig1 libdbus-1-3 libopengl0
   ```
 
 Qt's online installer or `aqtinstall` can supply Qt on all three platforms.

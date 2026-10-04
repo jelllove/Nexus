@@ -217,6 +217,7 @@ if(APPLE)
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.nexus.app"
         MACOSX_BUNDLE_BUNDLE_NAME "Nexus"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        INSTALL_RPATH "@executable_path/../Frameworks"
     )
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
