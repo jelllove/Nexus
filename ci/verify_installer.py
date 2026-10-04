@@ -157,7 +157,7 @@ def main():
                     check=True, timeout=90,
                 )
             report = validate_evidence(evidence / "screenshots", executable)
-            status.update({"status": "passed", "installedExecutable": str(executable),
+            status.update({"status": "passed", "installedExecutable": str(executable.resolve()),
                            "verification": report})
     except (OSError, ValueError, plistlib.InvalidFileException,
             subprocess.SubprocessError, tarfile.TarError) as error:
