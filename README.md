@@ -34,6 +34,19 @@ Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
 notes, not personal data. See [v1.0.9 release notes](docs/release-notes-v1.0.9.md).
 
+### Native installer screenshots
+
+These captures come from the installed native packages on GitHub-hosted runners
+using synthetic notes; Linux uses an Xvfb desktop.
+
+**macOS Apple Silicon**
+
+![Nexus installed from its macOS DMG](docs/screenshots/macos.png)
+
+**Linux x64**
+
+![Nexus launched from its extracted Linux package](docs/screenshots/linux.png)
+
 ## Features
 
 - **3-Pane Layout** — Products (notebooks) → Tasks (pages) → Rich Editor, with a resizable splitter
@@ -334,13 +347,15 @@ Python helper/CLI regressions are part of the ordinary CTest command; Python
 ## Publishing a release
 
 The primary repository is `jelllove/Nexus`; `qinqingxu/Nexus` is a private mirror.
-Feature work is pushed on `agents/macos-support` without rewriting `main`.
+Feature work is pushed on `agents/macos-support`. After verification, `main`
+can be fast-forwarded to the same commit without rewriting existing history.
 Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
 git push origin agents/macos-support
 # After the branch workflow passes:
+git push origin HEAD:main
 git tag -a v1.0.9 -m "Nexus v1.0.9"
 git push origin v1.0.9
 ```

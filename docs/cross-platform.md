@@ -48,7 +48,7 @@ AppImages. Windows release installers remain the existing release mechanism.
 macOS signing/notarization and Linux package-manager integration are not added.
 
 The CI workflow builds, tests and packages on Windows, macOS and Ubuntu.
-No successful native macOS/Linux run is assumed from Windows-only validation.
+Native validation results are recorded separately from local Windows checks.
 
 Release tags matching the CMake version additionally require all build/test
 and installed-package jobs to pass before publication. Windows installers are
@@ -73,10 +73,19 @@ Local Windows validation used MSVC and Qt 6.8.3:
   development Qt directory removed from `PATH`.
 - The Linux launcher passed a shell syntax check.
 
-macOS/Linux native builds, native hotkey behavior and desktop smoke tests have
-not been run locally. There is no native Linux development environment or macOS
-host available here. The configured CI matrix is the next verification gate;
-it has not been triggered or reported as successful.
+There is no local macOS or Linux development host. Native CI subsequently built
+and passed all seven regression suites on Windows, macOS arm64 and Linux x64.
+The clean-package jobs also rendered/saved the synthetic note and captured native
+screenshots on both macOS and Linux. The inspected captures are persisted in
+`docs/screenshots/macos.png` and `docs/screenshots/linux.png`.
+
+The [native build run](https://github.com/jelllove/Nexus/actions/runs/37213071912)
+passed all three build jobs; its Linux verification exposed a missing XCB system
+library. After correcting that prerequisite, the
+[package verification run](https://github.com/jelllove/Nexus/actions/runs/37213694658)
+passed both native installer jobs using those same packages. Release-tag CI
+repeats the complete gate on the final tagged commit. Native global hotkey and
+Dock-interaction behavior are not covered by these automated screenshot checks.
 
 ## Acceptance criteria and verification
 
@@ -125,8 +134,8 @@ packaged application rendered the synthetic note, saved/read it back, produced
 both PNGs, and exited successfully with only its deployed runtime available.
 The app-window screenshot was inspected and shows the three-pane UI and editor
 content. CLI checks reject missing/extra arguments and existing output directories
-without changing their database. Native macOS/Linux screenshot jobs are configured
-but have not yet run; local Windows screenshots are not evidence of those platforms.
+without changing their database. Native macOS/Linux screenshot jobs have now passed, with their own rendered-note
+and save checks; local Windows screenshots are not substituted for native evidence.
 
 ## Non-goals and limitations
 
