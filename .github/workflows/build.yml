@@ -7,9 +7,16 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      package_run_id:
+        description: 'Optional completed build run ID: verify its existing native packages without rebuilding'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   build:
+    if: inputs.package_run_id == ''
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -116,6 +123,7 @@ jobs:
   verify-installer:
     name: Verify ${{ matrix.platform }} installer and screenshots
     needs: build
+    if: always() && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.package_run_id != ''))
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -126,6 +134,9 @@ jobs:
           - os: ubuntu-22.04
             platform: Linux
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -138,6 +149,8 @@ jobs:
         with:
           name: Nexus-${{ matrix.platform }}
           path: installer-package
+          run-id: ${{ inputs.package_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Install Linux desktop runtime (no development Qt)
         if: runner.os == 'Linux'

@@ -24,6 +24,7 @@ def clean_environment(environment, platform):
     if platform == "Linux":
         env["QT_QPA_PLATFORM"] = "xcb"
         env["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu"
+        env["QT_DEBUG_PLUGINS"] = "1"
     return env
 
 

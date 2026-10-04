@@ -290,6 +290,11 @@ installation:
   verify actual editor DOM rendering and note saving, then capture screenshots.
   Missing/blank captures, failed startup/render/save and timeouts fail the job.
 
+For package-only diagnosis, manually run the workflow with `package_run_id`
+set to a completed build run's numeric ID. This reuses its packages on fresh
+verification hosts and does not build or publish a release. Leave it empty
+for normal full verification. Linux logs include Qt plugin-loader diagnostics.
+
 To review captures, open **GitHub Actions > Build > the run > Artifacts** and
 download:
 
