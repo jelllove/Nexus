@@ -105,6 +105,10 @@ elseif(APPLE)
 else()
     qt_add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${RESOURCES})
 endif()
+qt_import_plugins(${PROJECT_NAME}
+    EXCLUDE_BY_TYPE sqldrivers position qmltooling
+    INCLUDE Qt6::QSQLiteDriverPlugin
+)
 
 include(CTest)
 if(BUILD_TESTING)
