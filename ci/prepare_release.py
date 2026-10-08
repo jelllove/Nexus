@@ -11,6 +11,9 @@ import zipfile
 
 from verify_installer import validate_evidence
 
+EVIDENCE_SYSTEMS = ("macOS", "Linux", "Ubuntu-22.04-DEB", "Ubuntu-24.04-DEB",
+                    "Fedora-43-RPM", "Fedora-44-RPM")
+
 
 def prepare_release(source, output, tag):
     root = Path(__file__).resolve().parents[1]
@@ -21,7 +24,8 @@ def prepare_release(source, output, tag):
     expected = {
         "Windows": [f"Nexus-Setup-v{version}-x64.exe", f"Nexus-{version}-Windows-x64.zip"],
         "macOS": [f"Nexus-{version}-macOS-arm64.dmg"],
-        "Linux": [f"Nexus-{version}-Linux-x64.tar.gz"],
+        "Linux": [f"Nexus-{version}-Linux-x64.tar.gz",
+                  f"Nexus-{version}-Linux-x64.deb", f"Nexus-{version}-Linux-x64.rpm"],
     }
     packages = []
     for system, names in expected.items():
@@ -30,16 +34,21 @@ def prepare_release(source, output, tag):
             if not package.is_file() or package.stat().st_size == 0:
                 raise ValueError(f"Required release package is missing/empty: {name}")
             packages.append(package)
-    for system in ("macOS", "Linux"):
+    for system in EVIDENCE_SYSTEMS:
         evidence = source / f"Nexus-{system}-installer-evidence"
         report = json.loads((evidence / "verification.json").read_text())
         if report.get("status") != "passed":
             raise ValueError(f"{system} installed-package verification did not pass.")
+        if system not in ("macOS", "Linux"):
+            for key in ("packageInstalled", "packageReinstalled", "packageRemoved",
+                        "userDataPreserved", "systemIntegration"):
+                if report.get(key) is not True:
+                    raise ValueError(f"{system} package lifecycle check failed: {key}")
         validate_evidence(evidence / "screenshots", Path(report["installedExecutable"]))
     output.mkdir(parents=True, exist_ok=False)
     for package in packages:
         shutil.copy2(package, output / package.name)
-    for system in ("macOS", "Linux"):
+    for system in EVIDENCE_SYSTEMS:
         evidence = source / f"Nexus-{system}-installer-evidence"
         for name in ("app-window.png", "desktop.png"):
             shutil.copy2(evidence / "screenshots" / name, output / f"Nexus-{system}-{name}")

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Nexus
+Comment=Desktop task management
+Exec=nexus
+Icon=nexus
+Terminal=false
+Categories=Office;ProjectManagement;

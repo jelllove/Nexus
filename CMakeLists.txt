@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Nexus VERSION 1.0.9 LANGUAGES CXX)
+project(Nexus VERSION 1.0.10 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -118,6 +118,8 @@ if(BUILD_TESTING)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_installer_verification.py)
     add_test(NAME ReleasePreparationTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_release_preparation.py)
+    add_test(NAME NativePackageTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_native_package.py)
     add_test(NAME InstallerSmokeCliTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_installer_smoke_cli.py
             $<TARGET_FILE:Nexus>)

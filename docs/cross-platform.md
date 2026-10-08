@@ -47,6 +47,12 @@ Linux packages still depend on host system libraries; they are not universal
 AppImages. Windows release installers remain the existing release mechanism.
 macOS signing/notarization and Linux package-manager integration are not added.
 
+The v1.0.10 extension adds native package-manager integration as described in
+[native Linux packages](linux-native-packages.md): private `/opt/nexus` runtime,
+system launcher/menu/icon, DEB/RPM dependency metadata and four package lifecycle
+jobs required before release publication. The initial v1.0.9 design above remains
+the historical portable-package baseline; native packages do not replace it.
+
 The CI workflow builds, tests and packages on Windows, macOS and Ubuntu.
 Native validation results are recorded separately from local Windows checks.
 

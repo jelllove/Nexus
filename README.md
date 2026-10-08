@@ -16,14 +16,16 @@ An access-controlled mirror is published to
 [qinqingxu/Nexus](https://github.com/qinqingxu/Nexus/releases) using the same
 verified commit and assets.
 
-### v1.0.9 packages
+### v1.0.10 packages
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.9-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.9-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.9-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Linux x64 | `Nexus-1.0.9-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.10-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.10-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.10-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.10-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.10-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.10-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.10-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.10-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -32,7 +34,26 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.9 release notes](docs/release-notes-v1.0.9.md).
+notes, not personal data. See [v1.0.10 release notes](docs/release-notes-v1.0.10.md).
+
+### Linux package-manager installation
+
+After installing the DEB/RPM, launch **Nexus** from the desktop menu or run
+`nexus` in a terminal. Private Qt files live in `/opt/nexus`; notes and settings
+remain in your user data directory. Quit Nexus before upgrading.
+
+```sh
+# Ubuntu 22.04/24.04 x64
+sudo apt install ./Nexus-1.0.10-Linux-x64.deb
+# Fedora 43/44 x64
+sudo dnf install ./Nexus-1.0.10-Linux-x64.rpm
+```
+
+Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
+delete notes/settings. Install local packages with apt/dnf rather than ignoring
+their dependencies. These files are not signed packages or an apt/yum repository.
+Debian, Rocky/RHEL and other distributions are not claimed without verification.
+See [native Linux packaging design](docs/linux-native-packages.md).
 
 ### Native installer screenshots
 
@@ -179,6 +200,20 @@ and resources rather than shipping only the application executable.
 macOS builds are not Developer ID signed/notarized; public distribution
 requires a separate signing workflow. Only install packages from a trusted source.
 
+For Linux DEB/RPM packaging, install `rpm` build tools and package the deployed
+runtime through the separate packaging project:
+
+```sh
+cmake --install build --config Release --prefix "$PWD/build/linux-stage"
+cmake -S packaging/native -B build/native-packages \
+  -DNEXUS_STAGE="$PWD/build/linux-stage"
+cpack --config build/native-packages/CPackConfig.cmake
+```
+
+The packages appear under `build/native-packages/packages`; CI copies them into
+the normal release package directory. Package generators use the same deployed
+app as the portable archive, with separate DEB/RPM dependency declarations.
+
 ## Run
 
 Windows quick-build output:
@@ -319,8 +354,12 @@ Each artifact includes `screenshots/app-window.png`, `screenshots/desktop.png`,
 `application.log`. The workflow summary links these downloads. Evidence is kept
 for **14 days**, including diagnostics on failure; unsuccessful runs may not
 have screenshots. Linux captures show a virtual desktop, not a physical monitor.
-These checks do not exercise Gatekeeper prompts, signing/notarization, DEB/RPM
-installers or native hotkeys.
+The archive/DMG checks do not exercise Gatekeeper prompts, signing/notarization
+or native hotkeys. Additional native-package jobs install/reinstall/remove DEBs
+on Ubuntu 22.04/24.04 and RPMs in Fedora 43/44 containers, verify menu/icon/launcher,
+capture rendered-note screenshots as an unprivileged user and check that removal
+preserves user data. Their evidence artifacts use names such as
+`Nexus-Ubuntu-24.04-DEB-installer-evidence` and `Nexus-Fedora-44-RPM-installer-evidence`.
 
 The [installer verifier](ci/verify_installer.py) requires Python 3.12+ on native
 macOS/Linux hosts. Run it inside an existing desktop session (or `xvfb-run` on
@@ -356,12 +395,12 @@ verification jobs pass. A tag must match the CMake application version.
 git push origin agents/macos-support
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.9 -m "Nexus v1.0.9"
-git push origin v1.0.9
+git tag -a v1.0.10 -m "Nexus v1.0.10"
+git push origin v1.0.10
 ```
 
 The tag workflow builds all three platforms, verifies installed macOS/Linux
-packages and screenshots, creates the Windows Inno Setup installer from the
+packages and screenshots, requires all four DEB/RPM lifecycle jobs, creates the Windows Inno Setup installer from the
 deployed runtime, and publishes a GitHub release only after these gates pass.
 Missing packages/evidence or a version mismatch block publication. Mirror
 releases reuse these verified assets rather than claiming a second validation.

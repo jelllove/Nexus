@@ -32,20 +32,25 @@ class ReleasePreparationTest(unittest.TestCase):
         names = {
             "Windows": [f"Nexus-Setup-v{VERSION}-x64.exe", f"Nexus-{VERSION}-Windows-x64.zip"],
             "macOS": [f"Nexus-{VERSION}-macOS-arm64.dmg"],
-            "Linux": [f"Nexus-{VERSION}-Linux-x64.tar.gz"],
+            "Linux": [f"Nexus-{VERSION}-Linux-x64.tar.gz",
+                      f"Nexus-{VERSION}-Linux-x64.deb", f"Nexus-{VERSION}-Linux-x64.rpm"],
         }
         for system, packages in names.items():
             directory = root / f"Nexus-{system}"
             directory.mkdir()
             for name in packages:
                 (directory / name).write_bytes(b"synthetic package fixture")
-        for system in ("macOS", "Linux"):
+        for system in ("macOS", "Linux", "Ubuntu-22.04-DEB", "Ubuntu-24.04-DEB",
+                       "Fedora-43-RPM", "Fedora-44-RPM"):
             evidence = root / f"Nexus-{system}-installer-evidence"
             screenshots = evidence / "screenshots"
             screenshots.mkdir(parents=True)
             executable = str(root / "installed" / system / "Nexus")
             (evidence / "verification.json").write_text(json.dumps({
                 "status": "passed", "installedExecutable": executable,
+                "packageInstalled": True, "packageReinstalled": True,
+                "packageRemoved": True, "userDataPreserved": True,
+                "systemIntegration": True,
             }))
             (screenshots / "report.json").write_text(json.dumps({
                 "status": "passed", "executable": executable,
@@ -60,9 +65,9 @@ class ReleasePreparationTest(unittest.TestCase):
             self.create_input(root)
             output = root / "release"
             MODULE.prepare_release(root, output, "v" + VERSION)
-            self.assertEqual(len(list(output.iterdir())), 11)
+            self.assertEqual(len(list(output.iterdir())), 25)
             checksums = (output / "SHA256SUMS").read_text().splitlines()
-            self.assertEqual(len(checksums), 10)
+            self.assertEqual(len(checksums), 24)
             for line in checksums:
                 digest, name = line.split("  ", 1)
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), digest)
@@ -92,6 +97,25 @@ class ReleasePreparationTest(unittest.TestCase):
             root = Path(directory)
             with self.assertRaisesRegex(ValueError, "tag"):
                 MODULE.prepare_release(root, root / "release", "v0.0.0")
+
+    def test_missing_native_package_blocks_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.create_input(root)
+            (root / "Nexus-Linux" / f"Nexus-{VERSION}-Linux-x64.deb").unlink()
+            with self.assertRaisesRegex(ValueError, "Required release package"):
+                MODULE.prepare_release(root, root / "release", "v" + VERSION)
+
+    def test_failed_package_removal_blocks_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.create_input(root)
+            report = root / "Nexus-Fedora-44-RPM-installer-evidence" / "verification.json"
+            data = json.loads(report.read_text())
+            data["packageRemoved"] = False
+            report.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, "lifecycle"):
+                MODULE.prepare_release(root, root / "release", "v" + VERSION)
 
 
 if __name__ == "__main__":

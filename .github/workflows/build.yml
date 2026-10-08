@@ -56,7 +56,7 @@ jobs:
           sudo apt-get install -y libx11-dev libgl1-mesa-dev libegl1-mesa-dev \
             libxcb-cursor0 libxkbcommon-x11-0 libxcb-xinerama0 libnss3 libasound2 \
             libxcomposite1 libxrandr2 libxtst6 libxdamage1 libgbm1 libfontconfig1 \
-            libdbus-1-3
+            libdbus-1-3 rpm
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -90,6 +90,17 @@ jobs:
       - name: Package with Qt runtime
         run: cpack --config build/CPackConfig.cmake -C Release
 
+      - name: Package native Linux DEB and RPM
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --install build --config Release --prefix "$PWD/build/linux-stage"
+          cmake -S packaging/native -B build/native-packages \
+            -DNEXUS_STAGE="$PWD/build/linux-stage"
+          cpack --config build/native-packages/CPackConfig.cmake
+          cp build/native-packages/packages/*.deb build/native-packages/packages/*.rpm build/packages/
+
       - name: Build Windows installer from deployed runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -118,6 +129,8 @@ jobs:
             build/packages/*.dmg
             build/packages/*.tar.gz
             build/packages/*.exe
+            build/packages/*.deb
+            build/packages/*.rpm
           if-no-files-found: error
 
   verify-installer:
@@ -225,10 +238,89 @@ jobs:
             echo 'A failed job may have logs only; screenshots are evidence only when verification passes.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  verify-native-linux:
+    name: Verify ${{ matrix.platform }} package lifecycle
+    needs: build
+    if: always() && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.package_run_id != ''))
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: Ubuntu-22.04-DEB
+            format: deb
+            image: ''
+          - os: ubuntu-24.04
+            platform: Ubuntu-24.04-DEB
+            format: deb
+            image: ''
+          - os: ubuntu-22.04
+            platform: Fedora-43-RPM
+            format: rpm
+            image: fedora:43
+          - os: ubuntu-22.04
+            platform: Fedora-44-RPM
+            format: rpm
+            image: fedora:44
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Nexus-Linux
+          path: installer-package
+          run-id: ${{ inputs.package_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Install DEB desktop test tools
+        if: matrix.format == 'deb'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth fluxbox dbus-x11 fonts-dejavu-core
+      - name: Install, reinstall, launch and remove DEB
+        if: matrix.format == 'deb'
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(installer-package/*.deb)
+          test "${#packages[@]}" -eq 1
+          xvfb-run -a -s "-screen 0 1600x1000x24" dbus-run-session -- \
+            bash -c 'set -euo pipefail
+              fluxbox > "$RUNNER_TEMP/nexus-native-window-manager.log" 2>&1 &
+              wm_pid=$!
+              trap "kill $wm_pid 2>/dev/null || true" EXIT
+              python ci/verify_native_package.py --package "$1" --evidence installer-evidence' \
+            bash "${packages[0]}"
+      - name: Install, reinstall, launch and remove RPM on Fedora
+        if: matrix.format == 'rpm'
+        shell: bash
+        env:
+          FEDORA_IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          packages=(installer-package/*.rpm)
+          test "${#packages[@]}" -eq 1
+          docker run --rm -v "$PWD:/workspace" -w /workspace "$FEDORA_IMAGE" \
+            bash ci/run_fedora_native.sh "${packages[0]}" installer-evidence
+      - name: Upload native package lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexus-${{ matrix.platform }}-installer-evidence
+          path: installer-evidence/
+          retention-days: 14
+          if-no-files-found: warn
+
   release:
     name: Publish verified release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, verify-installer]
+    needs: [build, verify-installer, verify-native-linux]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
