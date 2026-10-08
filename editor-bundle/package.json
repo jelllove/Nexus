@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "check": "node --check entry.js && node --check build.mjs && node --check ../resources/editor/editor.js"
   },
   "dependencies": {
     "@tiptap/core": "^3.22.3",

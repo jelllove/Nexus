@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, agents/macos-support]
+    branches: [main, agents/macos-support, 'agents/release-*']
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -14,7 +14,36 @@ on:
         default: ''
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  validate-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: editor-bundle
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: editor-bundle/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check editor JavaScript syntax
+        run: npm run check
+      - name: Build editor bundle
+        run: npm run build
+      - name: Check generated bundle is current
+        run: git -C .. diff --exit-code -- resources/editor/tiptap-bundle.js
+
   build:
     if: inputs.package_run_id == ''
     timeout-minutes: 45
@@ -76,7 +105,7 @@ jobs:
       - name: Test
         env:
           QTWEBENGINE_CHROMIUM_FLAGS: --disable-gpu
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit test-results.xml
 
       - name: Upload test reports
         if: always()
@@ -85,6 +114,8 @@ jobs:
           name: Nexus-${{ matrix.platform }}-test-reports
           path: |
             build/*Test.txt
+            build/test-results.xml
+            build/tests/nexus-core.junit.xml
             build/Testing/Temporary/LastTest.log
 
       - name: Package with Qt runtime
@@ -320,7 +351,7 @@ jobs:
   release:
     name: Publish verified release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, verify-installer, verify-native-linux]
+    needs: [validate-editor, build, verify-installer, verify-native-linux]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
