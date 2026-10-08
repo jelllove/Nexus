@@ -18,6 +18,9 @@
 #include <QApplication>
 #include <QDesktopServices>
 #include <QProcess>
+#include <QProgressDialog>
+#include <QProgressBar>
+#include <QLocale>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QRadioButton>
@@ -43,8 +46,9 @@
 #define APP_GIT_COMMIT "unknown"
 #endif
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(QWidget *parent, UpdateService *updateService)
     : QMainWindow(parent)
+    , m_updateService(updateService ? updateService : &UpdateService::instance())
 {
     setupUi();
     setupMenuBar();
@@ -490,7 +494,7 @@ void MainWindow::showSettings()
 {
     SettingsDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
-        UpdateService::instance().setAutomaticChecksEnabled(
+        m_updateService->setAutomaticChecksEnabled(
             DatabaseManager::instance().getSetting("check_updates", "true") == "true");
     }
 }
@@ -1163,7 +1167,7 @@ bool MainWindow::resolveSimpleDescriptions(
 
 void MainWindow::setupUpdates()
 {
-    auto &updater = UpdateService::instance();
+    auto &updater = *m_updateService;
     connect(&updater, &UpdateService::updateAvailable,
             this, &MainWindow::onUpdateAvailable);
     connect(&updater, &UpdateService::downloadProgress,
@@ -1172,8 +1176,17 @@ void MainWindow::setupUpdates()
             this, &MainWindow::onDownloadFinished);
     connect(&updater, &UpdateService::error,
             this, [this](const QString &msg) {
+                const bool downloading = !m_downloadProgress.isNull();
+                closeDownloadProgress();
                 statusBar()->showMessage("Update: " + msg, 5000);
+                if (downloading) {
+                    QMessageBox::warning(this, "Update Download Failed", msg);
+                }
             });
+    connect(&updater, &UpdateService::downloadCanceled, this, [this]() {
+        closeDownloadProgress();
+        statusBar()->showMessage("Update download canceled. You can retry from Help > Check for Updates.", 10000);
+    });
     connect(&updater, &UpdateService::upToDate, this, [this]() {
         statusBar()->showMessage("Nexus is up to date.", 5000);
     });
@@ -1184,8 +1197,13 @@ void MainWindow::setupUpdates()
 void MainWindow::checkForUpdates()
 {
     if (m_updatePromptOpen) return;
-    auto &updater = UpdateService::instance();
+    auto &updater = *m_updateService;
     if (updater.isBusy()) {
+        if (m_downloadProgress) {
+            m_downloadProgress->show();
+            m_downloadProgress->raise();
+            m_downloadProgress->activateWindow();
+        }
         statusBar()->showMessage("An update check or download is already in progress.", 5000);
         return;
     }
@@ -1198,48 +1216,122 @@ void MainWindow::checkForUpdates()
 
 void MainWindow::onUpdateAvailable(const QString &latestVersion,
                                     const QString &downloadUrl,
-                                    const QString &releaseNotes)
+                                    const QString &releaseNotes,
+                                    bool manual)
 {
-    const bool autoInstallEnabled =
-        DatabaseManager::instance().getSetting("auto_install_updates", "true") == "true";
-    if (autoInstallEnabled) {
-        statusBar()->showMessage(
-            QString("New version %1 found. Downloading update automatically...").arg(latestVersion));
-        UpdateService::instance().downloadAndInstall(downloadUrl);
-        return;
+    if (m_updatePromptOpen || m_downloadProgress || m_updateService->isBusy()) return;
+    auto &db = DatabaseManager::instance();
+    const QString savedReminder = db.getSetting("update_reminder_after");
+    const QDateTime reminderAfter = QDateTime::fromString(savedReminder, Qt::ISODateWithMs);
+    if (!savedReminder.isEmpty() && !reminderAfter.isValid()) {
+        qWarning("Invalid update reminder date; reminders will resume.");
     }
+    if (!manual && reminderAfter > QDateTime::currentDateTimeUtc()) return;
 
-    // Truncate release notes for display
     QString notes = releaseNotes.left(500);
     if (releaseNotes.length() > 500) notes += "...";
 
     m_updatePromptOpen = true;
-    int ret = QMessageBox::question(this, "Update Available",
+    QDialog prompt(this);
+    prompt.setObjectName("updateAvailableDialog");
+    prompt.setWindowTitle("Update Available");
+    prompt.setMinimumWidth(500);
+    auto *layout = new QVBoxLayout(&prompt);
+    auto *message = new QLabel(
         QString("A new version of Nexus is available!\n\n"
                 "Current version: v%1\n"
                 "Latest version: %2\n\n"
                 "%3\n\n"
-                "Would you like to download the update?")
-            .arg(qApp->applicationVersion(), latestVersion, notes),
-        QMessageBox::Yes | QMessageBox::No);
+                "Download the update now? Nexus will ask again before installing or opening the package.")
+            .arg(qApp->applicationVersion(), latestVersion, notes), &prompt);
+    message->setTextFormat(Qt::PlainText);
+    message->setWordWrap(true);
+    layout->addWidget(message);
+    layout->addWidget(new QLabel("If you choose Not now:", &prompt));
+    auto *delay = new QComboBox(&prompt);
+    delay->setObjectName("updateReminderDelay");
+    delay->addItem("Don't ask for 6 hours", 0);
+    delay->addItem("Don't ask for 1 month", 1);
+    delay->addItem("Don't ask for 2 months", 2);
+    delay->addItem("Don't ask for 3 months", 3);
+    layout->addWidget(delay);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Yes | QDialogButtonBox::No, &prompt);
+    auto *yesButton = buttons->button(QDialogButtonBox::Yes);
+    auto *notNowButton = buttons->button(QDialogButtonBox::No);
+    notNowButton->setText("Not now");
+    notNowButton->setDefault(true);
+    yesButton->setAutoDefault(false);
+    connect(yesButton, &QPushButton::clicked, &prompt, &QDialog::accept);
+    connect(notNowButton, &QPushButton::clicked, &prompt, &QDialog::reject);
+    layout->addWidget(buttons);
+    const bool download = prompt.exec() == QDialog::Accepted;
     m_updatePromptOpen = false;
 
-    if (ret == QMessageBox::Yes) {
-        statusBar()->showMessage("Downloading update...");
-        UpdateService::instance().downloadAndInstall(downloadUrl);
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    const int months = delay->currentData().toInt();
+    QDateTime nextReminder = months ? now.addMonths(months) : now.addSecs(6 * 3600);
+    if (!months && reminderAfter > nextReminder) nextReminder = reminderAfter;
+    if (!db.setSetting("update_reminder_after", download ? QStringLiteral("")
+                                                       : nextReminder.toString(Qt::ISODateWithMs))) {
+        QMessageBox::warning(this, "Update Reminder Error",
+                             "Could not save the update reminder preference.\n"
+                             "No download was started. Please check the database and try again.");
+        return;
     }
+    if (!download) {
+        statusBar()->showMessage(
+            "Automatic update reminders paused until "
+                + QLocale().toString(nextReminder.toLocalTime(), QLocale::ShortFormat)
+                + ". Help > Check for Updates is still available.", 10000);
+        return;
+    }
+
+    m_downloadProgress = new QProgressDialog("Starting update download...", "Cancel", 0, 0, this);
+    m_downloadProgress->setObjectName("updateDownloadProgress");
+    m_downloadProgress->setWindowTitle("Downloading Nexus Update");
+    m_downloadProgress->setWindowModality(Qt::NonModal);
+    m_downloadProgress->setMinimumWidth(420);
+    m_downloadProgress->setMinimumDuration(0);
+    m_downloadProgress->setAutoClose(false);
+    m_downloadProgress->setAutoReset(false);
+    m_downloadProgress->findChild<QProgressBar *>()->setTextVisible(false);
+    connect(m_downloadProgress, &QProgressDialog::canceled,
+            m_updateService, &UpdateService::cancelDownload);
+    m_downloadProgress->show();
+    statusBar()->showMessage("Downloading update...");
+    m_updateService->downloadAndInstall(downloadUrl);
+}
+
+void MainWindow::closeDownloadProgress()
+{
+    if (!m_downloadProgress) return;
+    m_downloadProgress->hide();
+    m_downloadProgress->deleteLater();
+    m_downloadProgress.clear();
 }
 
 void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
 {
+    if (!m_downloadProgress) return;
+    const QString received = QLocale().formattedDataSize(qMax(qint64(0), bytesReceived));
+    QString text;
     if (bytesTotal > 0) {
-        int percent = static_cast<int>(bytesReceived * 100 / bytesTotal);
-        statusBar()->showMessage(QString("Downloading update... %1%").arg(percent));
+        const int percent = static_cast<int>(qBound(0.0, 100.0 * bytesReceived / bytesTotal, 100.0));
+        m_downloadProgress->setRange(0, 100);
+        m_downloadProgress->setValue(percent);
+        text = QString("Downloading update... %1%\n%2 / %3")
+                   .arg(percent).arg(received, QLocale().formattedDataSize(bytesTotal));
+    } else {
+        m_downloadProgress->setRange(0, 0);
+        text = QString("Downloading update...\n%1 received (total size unknown)").arg(received);
     }
+    m_downloadProgress->setLabelText(text);
+    statusBar()->showMessage(text.simplified());
 }
 
 void MainWindow::onDownloadFinished(const QString &installerPath)
 {
+    closeDownloadProgress();
     m_pendingInstallerPath = installerPath;
     if (m_updatePromptOpen) return;
     m_updatePromptOpen = true;

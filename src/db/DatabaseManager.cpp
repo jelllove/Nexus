@@ -1576,13 +1576,18 @@ QString DatabaseManager::getSetting(const QString &key, const QString &defaultVa
     return defaultValue;
 }
 
-void DatabaseManager::setSetting(const QString &key, const QString &value)
+bool DatabaseManager::setSetting(const QString &key, const QString &value)
 {
     QSqlQuery query(m_db);
     query.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
     query.addBindValue(key);
     query.addBindValue(value);
-    query.exec();
+    if (!query.exec()) {
+        qWarning().noquote() << QString("Failed to save setting '%1': %2")
+                                   .arg(key, query.lastError().text());
+        return false;
+    }
+    return true;
 }
 
 void DatabaseManager::updateFtsIndex(int taskId, const QString &title, const QString &content)

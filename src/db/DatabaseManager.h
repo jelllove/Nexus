@@ -77,7 +77,7 @@ public:
 
     // Settings
     QString getSetting(const QString &key, const QString &defaultValue = QString());
-    void setSetting(const QString &key, const QString &value);
+    bool setSetting(const QString &key, const QString &value);
 
 signals:
     void productAdded(int id);

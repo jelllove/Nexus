@@ -90,7 +90,7 @@ using synthetic notes; Linux uses an Xvfb desktop.
 - **Product Ordering & Archive** — Drag to reorder products, archive/reactivate products, and expand archived products below the active list
 - **System Tray** — Minimize to tray when available; otherwise save and exit on close
 - **Global Hotkey** — Control+Shift+N using Win32, macOS Carbon, or Linux X11; native Wayland hotkeys are not supported
-- **GitHub Release Auto-Update** — Checks on startup and every 2 hours while running (including in the system tray), optionally downloads updates automatically, and asks before saving the current note and launching the installer
+- **GitHub Release Auto-Update** — Checks on startup and every 6 hours (including in the system tray), asks before downloading, supports 1/2/3-month reminder pauses, and shows cancellable download progress
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
 - **Image Support** — Paste or drag images into the editor; stored locally in the platform's application-data directory
 - **Content History** — Automatic snapshots for undo/redo support
@@ -286,11 +286,15 @@ Before trying a new local build, allow pending edits to autosave, then use
 
 ## Update checks
 
-- **Settings > Updates** controls automatic startup and two-hour checks; changes take effect immediately.
-- **Help > Check for Updates** also works when automatic checks are disabled.
+- **Settings > Updates** controls automatic startup and six-hour checks; changes take effect immediately.
+- A new release opens **Update Available** with **Yes** and **Not now**. Downloads only start after **Yes**, including for users who previously enabled automatic downloading; that old setting is no longer used.
+- **Not now**, Escape, or closing the prompt postpones reminders for six hours by default. Select **Don't ask for 1/2/3 months** before choosing **Not now** to pause automatic prompts for that many calendar months (clamped to the last day for shorter months).
+- The UTC reminder deadline is saved in the current database and survives restarts. It covers all release versions; background checks continue during the pause. After expiry, the next scheduled check can remind you again.
+- **Help > Check for Updates** bypasses paused reminders and disabled automatic checks. Choosing **Not now** with the default six-hour option does not shorten an existing longer pause; choosing **Yes** clears it. Settings displays the pause deadline in local time.
+- **Yes** opens a download dialog showing percentage and downloaded/total size. If the server does not report a total, progress is indeterminate with the received size. **Cancel** or closing the download window aborts the download without starting an installer, and manual checks can retry.
 - Checks and downloads cannot overlap. Background errors are logged and shown in the status bar, not an error popup; the next scheduled check can retry.
-- The same release is not repeatedly prompted during a session. Manual checks can retry a dismissed update.
-- Automatic download does not mean automatic shutdown: on Windows, **Install now** saves the current note before launching the installer and quitting. On macOS/Linux, **Open update** saves the note, opens the DMG/folder, and keeps Nexus running. Quit Nexus before manually installing the replacement. Save/open failures leave Nexus open.
+- Download failures close the progress dialog and show an error. No partial installer is launched.
+- After download, Windows **Install now** saves the current task or subtask before launching the installer and quitting. On macOS/Linux, **Open update** saves the note, opens the DMG/folder, and keeps Nexus running. Quit Nexus before manually installing the replacement. Save/open failures leave Nexus open.
 - Choose **Later** to keep working; use **Help > Check for Updates** to reopen the downloaded update without downloading it again during the same session.
 - Checking requires Nexus to be running and the computer awake. This is not a background service; the Windows installer may require UAC confirmation.
 
@@ -302,7 +306,7 @@ Updates only select matching OS/CPU packages. Supported release asset names:
 
 If a release has no matching package, the updater reports an error instead of
 downloading a Windows installer on another OS. CI produces packages, but does
-not publish releases.
+not publish a release until all tag-build, editor and native installer checks pass.
 
 ## Desktop integration
 
@@ -320,7 +324,11 @@ then run `ctest --test-dir build -C Release --output-on-failure`.
 On Windows, add your Qt `bin` directory to `PATH` before running tests.
 Test reports are saved in `build/UpdateServiceTest.txt`, `build/UpdateUiTest.txt`
 and `build/SubtaskMoveTest.txt`, plus `build/UpdatePackageTest.txt`; test executables are kept separately under
-`build/tests`. The subtask suite uses an isolated temporary database and covers
+`build/tests`. Update tests use a fake network (no GitHub access or real installers)
+and a temporary database to verify the exact six-hour interval, persistent
+1/2/3-month pauses, expiry/manual overrides, required download consent, progress,
+cancellation, error handling, cached downloads and save-before-install protection.
+The subtask suite uses an isolated temporary database and covers
 ordering, reparenting, field preservation, rollback, the destination picker,
 mouse dragging, drop indicators, cancellation, edge scrolling, editor saves
 and selection.
