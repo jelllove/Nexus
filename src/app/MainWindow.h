@@ -16,13 +16,14 @@
 
 class UpdateService;
 class MarkdownPreviewDialog;
+class QProgressDialog;
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(QWidget *parent = nullptr, UpdateService *updateService = nullptr);
     ~MainWindow();
 
 protected:
@@ -46,7 +47,8 @@ private slots:
     void exportTasksToMarkdown();
     void previewTasksAsMarkdown();
     void showSettings();
-    void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl, const QString &releaseNotes);
+    void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl,
+                           const QString &releaseNotes, bool manual);
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
     void onDownloadFinished(const QString &installerPath);
 
@@ -72,6 +74,7 @@ private:
     void setupUpdates();
     void toggleVisibility();
     void checkForUpdates();
+    void closeDownloadProgress();
     bool prepareMarkdownPayload(PreparedMarkdownPayload &payload, const QString &actionName);
     bool promptExportScopeDialog(bool &exportAllProducts, int &selectedProductId, bool &includeDescription);
     bool promptTaskSelectionDialog(
@@ -103,6 +106,8 @@ private:
     bool m_searchActive = false;
     SearchViewSnapshot m_searchSnapshot;
     QPointer<MarkdownPreviewDialog> m_markdownPreviewDialog;
+    UpdateService *m_updateService;
+    QPointer<QProgressDialog> m_downloadProgress;
     QString m_pendingInstallerPath;
     bool m_updatePromptOpen = false;
 };

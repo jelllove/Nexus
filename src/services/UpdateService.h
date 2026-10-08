@@ -17,12 +17,15 @@ public:
     void setAutomaticChecksEnabled(bool enabled);
     void checkForUpdate(bool manual = true);
     void downloadAndInstall(const QString &downloadUrl);
+    void cancelDownload();
     bool isBusy() const;
 
 signals:
-    void updateAvailable(const QString &latestVersion, const QString &downloadUrl, const QString &releaseNotes);
+    void updateAvailable(const QString &latestVersion, const QString &downloadUrl,
+                         const QString &releaseNotes, bool manual);
     void downloadProgress(qint64 bytesReceived, qint64 bytesTotal);
     void downloadFinished(const QString &installerPath);
+    void downloadCanceled();
     void upToDate();
     void error(const QString &message);
 
@@ -31,7 +34,7 @@ private:
     QTimer *m_checkTimer;
     QPointer<QNetworkReply> m_checkReply;
     QPointer<QNetworkReply> m_downloadReply;
-    QString m_notifiedVersion;
+    bool m_downloadCancelled = false;
     QString m_installerUrl;
     QString m_installerPath;
 };

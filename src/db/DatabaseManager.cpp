@@ -775,12 +775,7 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
 {
     QList<Task> tasks;
     QSqlQuery query(m_db);
-    QString statusStr = "active";
-    if (status == TaskStatus::Archived) {
-        statusStr = "archived";
-    } else if (status == TaskStatus::Deleted) {
-        statusStr = "deleted";
-    }
+    QString statusStr = Task::statusToString(status);
     query.prepare(
         "SELECT id, product_id, title, content, priority, status, sort_order, "
         "created_at, updated_at, archived_at, due_date, work_status "
@@ -1044,18 +1039,32 @@ QList<Task> DatabaseManager::getDeletedTasks()
 
 bool DatabaseManager::reorderTasks(const QList<int> &taskIds)
 {
+    if (!m_db.transaction()) {
+        qWarning() << "Failed to start transaction for reorderTasks:" << m_db.lastError().text();
+        return false;
+    }
+
     QSqlQuery query(m_db);
-    m_db.transaction();
     for (int i = 0; i < taskIds.size(); ++i) {
         query.prepare("UPDATE tasks SET sort_order = ? WHERE id = ?");
         query.addBindValue(i);
         query.addBindValue(taskIds[i]);
         if (!query.exec()) {
-            m_db.rollback();
+            qWarning() << "Failed to reorder tasks:" << query.lastError().text();
+            if (!m_db.rollback()) {
+                qWarning() << "Failed to roll back task reorder:" << m_db.lastError().text();
+            }
             return false;
         }
     }
-    return m_db.commit();
+    if (!m_db.commit()) {
+        qWarning() << "Failed to commit task reorder:" << m_db.lastError().text();
+        if (!m_db.rollback()) {
+            qWarning() << "Failed to roll back task reorder:" << m_db.lastError().text();
+        }
+        return false;
+    }
+    return true;
 }
 
 // --- Sub-tasks ---
@@ -1567,13 +1576,18 @@ QString DatabaseManager::getSetting(const QString &key, const QString &defaultVa
     return defaultValue;
 }
 
-void DatabaseManager::setSetting(const QString &key, const QString &value)
+bool DatabaseManager::setSetting(const QString &key, const QString &value)
 {
     QSqlQuery query(m_db);
     query.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
     query.addBindValue(key);
     query.addBindValue(value);
-    query.exec();
+    if (!query.exec()) {
+        qWarning().noquote() << QString("Failed to save setting '%1': %2")
+                                   .arg(key, query.lastError().text());
+        return false;
+    }
+    return true;
 }
 
 void DatabaseManager::updateFtsIndex(int taskId, const QString &title, const QString &content)

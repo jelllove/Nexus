@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Nexus VERSION 1.0.10 LANGUAGES CXX)
+project(Nexus VERSION 1.0.11 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -113,6 +113,7 @@ qt_import_plugins(${PROJECT_NAME}
 include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    add_subdirectory(tests)
     find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
     add_test(NAME InstallerVerificationTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_installer_verification.py)

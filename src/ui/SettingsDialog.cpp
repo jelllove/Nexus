@@ -12,6 +12,8 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QSettings>
+#include <QDateTime>
+#include <QLocale>
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
@@ -102,14 +104,12 @@ void SettingsDialog::setupUi()
     auto *updateGroup = new QGroupBox("Updates", this);
     auto *updateLayout = new QFormLayout(updateGroup);
 
-    m_checkUpdates = new QCheckBox("Check for updates on startup and every 2 hours", this);
+    m_checkUpdates = new QCheckBox("Check for updates on startup and every 6 hours", this);
     updateLayout->addRow(m_checkUpdates);
-    m_autoInstallUpdates = new QCheckBox(
-        "Automatically download updates (ask before installing)", this);
-    updateLayout->addRow(m_autoInstallUpdates);
     auto *updateNote = new QLabel(
-        "Checks continue while Nexus is in the system tray. You can postpone installation.\n"
-        "Help > Check for Updates works even when automatic checks are disabled.", this);
+        "Checks continue while Nexus is in the system tray. Updates are only downloaded with your consent.\n"
+        "Choose Not now to postpone for 6 hours, or pause reminders for 1, 2 or 3 months.\n"
+        "Help > Check for Updates bypasses paused reminders and disabled automatic checks.", this);
     updateNote->setWordWrap(true);
     updateLayout->addRow(updateNote);
 #ifndef Q_OS_WIN
@@ -119,6 +119,15 @@ void SettingsDialog::setupUi()
     installNote->setWordWrap(true);
     updateLayout->addRow(installNote);
 #endif
+    const auto reminderAfter = QDateTime::fromString(
+        DatabaseManager::instance().getSetting("update_reminder_after"), Qt::ISODateWithMs);
+    if (reminderAfter > QDateTime::currentDateTimeUtc()) {
+        auto *reminderNote = new QLabel(
+            "Automatic reminders paused until "
+                + QLocale().toString(reminderAfter.toLocalTime(), QLocale::ShortFormat), this);
+        reminderNote->setWordWrap(true);
+        updateLayout->addRow(reminderNote);
+    }
 
     mainLayout->addWidget(updateGroup);
 
@@ -140,7 +149,6 @@ void SettingsDialog::loadSettings()
     m_aiModel->setText(db.getSetting("ai_model", "gpt-4o-mini"));
     m_hotkeyEdit->setText(db.getSetting("global_hotkey", "Ctrl+Shift+N"));
     m_checkUpdates->setChecked(db.getSetting("check_updates", "true") == "true");
-    m_autoInstallUpdates->setChecked(db.getSetting("auto_install_updates", "true") == "true");
 }
 
 void SettingsDialog::onSave()
@@ -164,7 +172,6 @@ void SettingsDialog::onSave()
     db.setSetting("ai_model", m_aiModel->text().trimmed());
     db.setSetting("global_hotkey", m_hotkeyEdit->text().trimmed());
     db.setSetting("check_updates", m_checkUpdates->isChecked() ? "true" : "false");
-    db.setSetting("auto_install_updates", m_autoInstallUpdates->isChecked() ? "true" : "false");
     accept();
 }
 
