@@ -47,6 +47,15 @@ struct Task {
     QDateTime archivedAt;
     QDateTime dueDate;
 
+    static QString statusToString(TaskStatus status) {
+        switch (status) {
+            case TaskStatus::Active:   return "active";
+            case TaskStatus::Archived: return "archived";
+            case TaskStatus::Deleted:  return "deleted";
+        }
+        return "active";
+    }
+
     static QString dueDateIcon(int taskId) {
         static const QString icons[] = {
             "\xF0\x9F\x91\xA4",  // 👤 person

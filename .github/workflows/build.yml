@@ -6,9 +6,44 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  validate-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: editor-bundle
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: editor-bundle/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check editor JavaScript syntax
+        run: npm run check
+
+      - name: Build editor bundle
+        run: npm run build
+
+      - name: Check generated bundle is current
+        run: git -C .. diff --exit-code -- resources/editor/tiptap-bundle.js
+
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -22,10 +57,23 @@ jobs:
           modules: 'qtwebengine qtwebchannel qtpositioning'
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}" -DBUILD_TESTING=ON
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexus-Windows-Tests
+          path: |
+            build/test-results.xml
+            build/tests/nexus-core.junit.xml
+          if-no-files-found: warn
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -35,6 +83,7 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -48,10 +97,23 @@ jobs:
           modules: 'qtwebengine qtwebchannel qtpositioning'
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}" -DBUILD_TESTING=ON
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexus-macOS-Tests
+          path: |
+            build/test-results.xml
+            build/tests/nexus-core.junit.xml
+          if-no-files-found: warn
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

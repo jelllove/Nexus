@@ -54,7 +54,7 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
         case PriorityTextRole:
             return Task::priorityToString(t.priority);
         case StatusRole:
-            return (t.status == TaskStatus::Active) ? "active" : "archived";
+            return Task::statusToString(t.status);
         case CreatedAtRole:
             return t.createdAt;
         case UpdatedAtRole:
@@ -284,7 +284,9 @@ bool TaskListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int
     if (destinationRow > sourceRow) targetIdx--;
 
     groupIds.move(fromIdx, targetIdx);
-    DatabaseManager::instance().reorderTasks(groupIds);
+    if (!DatabaseManager::instance().reorderTasks(groupIds)) {
+        return false;
+    }
     refresh();
     return true;
 }

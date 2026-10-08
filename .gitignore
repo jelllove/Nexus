@@ -9,6 +9,17 @@ aqtinstall.log
 # Editor bundle node_modules
 editor-bundle/node_modules/
 
+# Local credentials and developer overrides
+.env
+.env.*
+!.env.example
+CMakeUserPresets.json
+*.pem
+*.key
+
+# Installer output
+installer/Output/
+
 # Temporary / planning docs
 findings.md
 progress.md

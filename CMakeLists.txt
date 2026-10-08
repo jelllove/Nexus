@@ -7,6 +7,8 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+include(CTest)
+
 # Find Qt6 components
 find_package(Qt6 REQUIRED COMPONENTS
     Core
@@ -120,4 +122,9 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_NAME "Nexus"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     )
+endif()
+
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    add_subdirectory(tests)
 endif()

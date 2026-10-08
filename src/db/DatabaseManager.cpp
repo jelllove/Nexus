@@ -26,6 +26,14 @@ ProductStatus productStatusFromDb(const QString &value)
         : ProductStatus::Active;
 }
 
+TaskStatus taskStatusFromDb(const QString &value)
+{
+    if (value == "deleted") {
+        return TaskStatus::Deleted;
+    }
+    return value == "active" ? TaskStatus::Active : TaskStatus::Archived;
+}
+
 bool queryProductStatusColumns(QSqlDatabase &db, bool &hasStatus, bool &hasArchivedAt)
 {
     hasStatus = false;
@@ -642,7 +650,7 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
 {
     QList<Task> tasks;
     QSqlQuery query(m_db);
-    QString statusStr = (status == TaskStatus::Active) ? "active" : "archived";
+    QString statusStr = Task::statusToString(status);
     query.prepare(
         "SELECT id, product_id, title, content, priority, status, sort_order, "
         "created_at, updated_at, archived_at, due_date, work_status "
@@ -659,7 +667,7 @@ QList<Task> DatabaseManager::getTasksForProduct(int productId, TaskStatus status
         t.title = query.value(2).toString();
         t.content = query.value(3).toString();
         t.priority = static_cast<TaskPriority>(query.value(4).toInt());
-        t.status = (query.value(5).toString() == "active") ? TaskStatus::Active : TaskStatus::Archived;
+        t.status = taskStatusFromDb(query.value(5).toString());
         t.sortOrder = query.value(6).toInt();
         t.createdAt = query.value(7).toDateTime();
         t.updatedAt = query.value(8).toDateTime();
@@ -686,7 +694,7 @@ Task DatabaseManager::getTask(int id)
         t.title = query.value(2).toString();
         t.content = query.value(3).toString();
         t.priority = static_cast<TaskPriority>(query.value(4).toInt());
-        t.status = (query.value(5).toString() == "active") ? TaskStatus::Active : TaskStatus::Archived;
+        t.status = taskStatusFromDb(query.value(5).toString());
         t.sortOrder = query.value(6).toInt();
         t.createdAt = query.value(7).toDateTime();
         t.updatedAt = query.value(8).toDateTime();
@@ -900,18 +908,32 @@ QList<Task> DatabaseManager::getDeletedTasks()
 
 bool DatabaseManager::reorderTasks(const QList<int> &taskIds)
 {
+    if (!m_db.transaction()) {
+        qWarning() << "Failed to start transaction for reorderTasks:" << m_db.lastError().text();
+        return false;
+    }
+
     QSqlQuery query(m_db);
-    m_db.transaction();
     for (int i = 0; i < taskIds.size(); ++i) {
         query.prepare("UPDATE tasks SET sort_order = ? WHERE id = ?");
         query.addBindValue(i);
         query.addBindValue(taskIds[i]);
         if (!query.exec()) {
-            m_db.rollback();
+            qWarning() << "Failed to reorder tasks:" << query.lastError().text();
+            if (!m_db.rollback()) {
+                qWarning() << "Failed to roll back task reorder:" << m_db.lastError().text();
+            }
             return false;
         }
     }
-    return m_db.commit();
+    if (!m_db.commit()) {
+        qWarning() << "Failed to commit task reorder:" << m_db.lastError().text();
+        if (!m_db.rollback()) {
+            qWarning() << "Failed to roll back task reorder:" << m_db.lastError().text();
+        }
+        return false;
+    }
+    return true;
 }
 
 // --- Sub-tasks ---
@@ -1089,7 +1111,7 @@ QList<Task> DatabaseManager::searchTasks(const QString &query, int productId)
         t.title = q.value(2).toString();
         t.content = q.value(3).toString();
         t.priority = static_cast<TaskPriority>(q.value(4).toInt());
-        t.status = (q.value(5).toString() == "active") ? TaskStatus::Active : TaskStatus::Archived;
+        t.status = taskStatusFromDb(q.value(5).toString());
         t.sortOrder = q.value(6).toInt();
         t.createdAt = q.value(7).toDateTime();
         t.updatedAt = q.value(8).toDateTime();

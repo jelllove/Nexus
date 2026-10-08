@@ -52,6 +52,7 @@ resources/
   aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -m qtwebengine qtwebchannel qtpositioning
   ```
 - **CMake 3.21+** (bundled with VS2022)
+- **Node.js 22+** and npm for editor validation and rebuilding the TipTap bundle
 
 ## Build
 
@@ -85,6 +86,55 @@ dist\Nexus.exe
 ```
 
 The database (`nexus.db`) is stored in `%APPDATA%\Nexus\Nexus\` by default.
+
+## Development checks
+
+On Windows, run the validation helper from PowerShell:
+
+```powershell
+.\scripts\validate.ps1 -QtRoot C:\Qt\6.8.3\msvc2022_64
+```
+
+The helper finds CMake on PATH or in Visual Studio 2022 (including Build Tools),
+builds the application and tests, runs CTest, and checks editor JavaScript syntax.
+It does not deploy the application or copy your database. `-QtRoot` defaults to
+`QT_ROOT`, or `C:\Qt\6.8.3\msvc2022_64` when that environment variable is unset.
+Use `-BuildDirectory` and `-Configuration Debug` for a separate debug build.
+
+For manual validation, configure using the instructions above with
+`-DBUILD_TESTING=ON`, then run:
+
+```powershell
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure --no-tests=error
+npm --prefix editor-bundle run check
+```
+
+On macOS, configure with `cmake -S . -B build -DCMAKE_PREFIX_PATH="<Qt directory>" -DBUILD_TESTING=ON`
+and use the same build/test commands. The tests use Qt Test and an in-memory
+SQLite database; they do not open the application UI or access your personal data.
+CTest makes the matching Qt DLLs available on Windows. Set `-DBUILD_TESTING=OFF`
+when configuring a packaging-only build that does not need Qt Test.
+
+The regression suite covers product/task lifecycle, due-date ordering, subtasks,
+search index updates, settings, model roles and reorder transaction failures.
+JUnit results are written to `build/tests/nexus-core.junit.xml`.
+
+To rebuild the editor after changing its dependencies or entry point:
+
+```powershell
+npm --prefix editor-bundle ci
+npm --prefix editor-bundle run check
+npm --prefix editor-bundle run build
+```
+
+Commit intentional changes to both the lockfile and generated editor bundle.
+The existing PR workflow now runs Windows/macOS tests and a separate editor
+syntax/build job that also detects a stale generated bundle, retaining JUnit
+results even when tests fail. Syntax validation
+is not a full JavaScript linter, and these checks are not GUI end-to-end tests.
+Repository administrators must make the workflow checks required in branch
+protection; workflow configuration alone does not prevent merging.
 
 ## License
 
