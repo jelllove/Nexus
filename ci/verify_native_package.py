@@ -60,6 +60,19 @@ def main():
                 raise ValueError("Installed package metadata does not match the release version.")
             subprocess.run(reinstall, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=300)
             status["packageReinstalled"] = True
+            loader_env = dict(os.environ, LD_LIBRARY_PATH="/opt/nexus/lib")
+            libraries = [APP, Path("/opt/nexus/libexec/QtWebEngineProcess"),
+                         *Path("/opt/nexus/plugins").rglob("*.so")]
+            missing = []
+            for library in libraries:
+                result = subprocess.run(["ldd", str(library)], env=loader_env,
+                                        capture_output=True, text=True, check=True, timeout=30)
+                log.write(f"\nDependencies: {library}\n{result.stdout}{result.stderr}".encode())
+                missing.extend(line.strip() for line in result.stdout.splitlines()
+                               if "not found" in line)
+            if missing:
+                raise ValueError("Installed runtime dependencies are missing: "
+                                 + "; ".join(sorted(set(missing))))
             if (not APP.is_file() or not LAUNCHER.is_file() or not ICON.is_file()
                     or not os.access(LAUNCHER, os.X_OK)
                     or "Exec=nexus\n" not in DESKTOP.read_text()

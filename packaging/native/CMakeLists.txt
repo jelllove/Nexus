@@ -39,14 +39,14 @@ set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE amd64)
 set(CPACK_DEBIAN_PACKAGE_SECTION utils)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libc6 (>= 2.35), libstdc++6, libgcc-s1, libglib2.0-0, libnss3, libasound2 | libasound2t64, libx11-6, libxext6, libxcomposite1, libxrandr2, libxtst6, libxdamage1, libxfixes3, libgbm1, libfontconfig1, libfreetype6, libdbus-1-3, libgl1, libegl1, libopengl0, libdrm2, libxcb1, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-image0, libxcb-render-util0, libxcb-randr0, libxcb-xfixes0, libxcb-sync1, libxcb-xkb1, libxcb-shape0, libxkbcommon0, libxkbcommon-x11-0, libssl3 | libssl3t64, zlib1g")
+    "libc6 (>= 2.35), libstdc++6, libgcc-s1, libatomic1, libglib2.0-0, libnss3, libasound2 | libasound2t64, libx11-6, libxext6, libxcomposite1, libxrandr2, libxtst6, libxdamage1, libxfixes3, libgbm1, libfontconfig1, libfreetype6, libdbus-1-3, libgl1, libegl1, libopengl0, libdrm2, libxcb1, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-image0, libxcb-render-util0, libxcb-randr0, libxcb-xfixes0, libxcb-sync1, libxcb-xkb1, libxcb-shape0, libxkbcommon0, libxkbcommon-x11-0, libssl3 | libssl3t64, zlib1g")
 
 set(CPACK_RPM_FILE_NAME "Nexus-${PROJECT_VERSION}-Linux-x64.rpm")
 set(CPACK_RPM_PACKAGE_ARCHITECTURE x86_64)
 set(CPACK_RPM_PACKAGE_LICENSE MIT)
 set(CPACK_RPM_PACKAGE_AUTOREQPROV OFF)
 set(CPACK_RPM_PACKAGE_REQUIRES
-    "glibc >= 2.35, libstdc++, libgcc, glib2, nss, alsa-lib, libX11, libXext, libXcomposite, libXrandr, libXtst, libXdamage, libXfixes, mesa-libgbm, fontconfig, freetype, dbus-libs, libglvnd-glx, libglvnd-egl, libglvnd-opengl, libdrm, libxcb, libxkbcommon, libxkbcommon-x11, xcb-util-cursor, xcb-util-wm, xcb-util-keysyms, xcb-util-image, xcb-util-renderutil, openssl-libs >= 3, zlib")
+    "glibc >= 2.35, libstdc++, libgcc, libatomic, glib2, nss, alsa-lib, libX11, libXext, libXcomposite, libXrandr, libXtst, libXdamage, libXfixes, mesa-libgbm, fontconfig, freetype, dbus-libs, libglvnd-glx, libglvnd-egl, libglvnd-opengl, libdrm, libxcb, libxkbcommon, libxkbcommon-x11, xcb-util-cursor, xcb-util-wm, xcb-util-keysyms, xcb-util-image, xcb-util-renderutil, openssl-libs >= 3, zlib")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     /opt /usr /usr/bin /usr/share /usr/share/applications /usr/share/icons
     /usr/share/icons/hicolor /usr/share/icons/hicolor/256x256
