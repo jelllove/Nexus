@@ -18,11 +18,15 @@ Nexus is a C++17/Qt 6.8.3 desktop application with an embedded TipTap editor.
   Visual Studio edition. Node.js 22+ is required for the editor syntax checks.
 - For targeted C++ changes, configure with `-DBUILD_TESTING=ON`, build
   `NexusCoreTests`, then run
-  `ctest --test-dir build -C Release --output-on-failure --no-tests=error`.
+  `ctest --test-dir build -C Release --output-on-failure --no-tests=error -R "^nexus-core$"`.
+  Build all targets and run unfiltered CTest before release integration is complete.
 - For editor changes, run `npm --prefix editor-bundle run check`. After entry
   point or dependency changes, also run `npm --prefix editor-bundle ci` and
   `npm --prefix editor-bundle run build`, and review the generated bundle diff.
-- Use the commands in README.md for manual and macOS builds.
+- Use the commands in README.md for manual, macOS and Linux builds.
+- Release tags must match the CMake version. Require editor validation, all
+  three platform builds/tests and all six native installer environments before
+  publishing. Mirror exactly the verified tag and assets; do not rewrite releases.
 
 ## Safety and maintenance
 

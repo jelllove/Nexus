@@ -16,16 +16,16 @@ An access-controlled mirror is published to
 [qinqingxu/Nexus](https://github.com/qinqingxu/Nexus/releases) using the same
 verified commit and assets.
 
-### v1.0.10 packages
+### v1.0.11 packages
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.10-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.10-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.10-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.10-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.10-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.10-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.10-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.10-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.11-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.11-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.11-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.11-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.11-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.11-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.11-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.11-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -34,7 +34,10 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.10 release notes](docs/release-notes-v1.0.10.md).
+notes, not personal data. See [v1.0.11 release notes](docs/release-notes-v1.0.11.md).
+This release integrates core persistence regressions and consent-based update
+reminders into the existing cross-platform application. Earlier releases and
+their assets remain unchanged.
 
 ### Linux package-manager installation
 
@@ -44,9 +47,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.10-Linux-x64.deb
+sudo apt install ./Nexus-1.0.11-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.10-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.11-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -57,8 +60,9 @@ See [native Linux packaging design](docs/linux-native-packages.md).
 
 ### Native installer screenshots
 
-These captures come from the installed native packages on GitHub-hosted runners
-using synthetic notes; Linux uses an Xvfb desktop.
+These reference captures are from v1.0.10 installed native packages on
+GitHub-hosted runners using synthetic notes; Linux uses an Xvfb desktop.
+Each new release includes its own version-specific screenshots and evidence.
 
 **macOS Apple Silicon**
 
@@ -403,20 +407,22 @@ Python helper/CLI regressions are part of the ordinary CTest command; Python
 ## Publishing a release
 
 The primary repository is `jelllove/Nexus`; `qinqingxu/Nexus` is a private mirror.
-Feature work is pushed on `agents/macos-support`. After verification, `main`
+Release integration is pushed on `agents/release-*`; cross-platform work may
+also use `agents/macos-support`. After verification, `main`
 can be fast-forwarded to the same commit without rewriting existing history.
 Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/macos-support
+git push origin agents/release-v1.0.11
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.10 -m "Nexus v1.0.10"
-git push origin v1.0.10
+git tag -a v1.0.11 -m "Nexus v1.0.11"
+git push origin v1.0.11
 ```
 
-The tag workflow builds all three platforms, verifies installed macOS/Linux
+The tag workflow checks editor syntax and bundle reproducibility, runs all nine
+CTest suites on each platform, builds all three platforms, verifies installed macOS/Linux
 packages and screenshots, requires all four DEB/RPM lifecycle jobs, creates the Windows Inno Setup installer from the
 deployed runtime, and publishes a GitHub release only after these gates pass.
 Missing packages/evidence or a version mismatch block publication. Mirror
@@ -458,10 +464,11 @@ ctest --test-dir build -C Release --output-on-failure --no-tests=error
 npm --prefix editor-bundle run check
 ```
 
-On macOS, configure with `cmake -S . -B build -DCMAKE_PREFIX_PATH="<Qt directory>" -DBUILD_TESTING=ON`
-and use the same build/test commands. The tests use Qt Test and an in-memory
-SQLite database; they do not open the application UI or access your personal data.
-CTest makes the matching Qt DLLs available on Windows. Set `-DBUILD_TESTING=OFF`
+On macOS/Linux, use the platform configure instructions above and the same
+build/test commands. Core tests use in-memory SQLite; UI tests use an offscreen
+desktop, a temporary database and fake update requests, not personal data.
+The Windows helper supplies Qt DLLs on the test process PATH; for manual CTest,
+add the Qt `bin` directory to PATH first. Set `-DBUILD_TESTING=OFF`
 when configuring a packaging-only build that does not need Qt Test.
 
 The regression suite covers product/task lifecycle, due-date ordering, subtasks,
@@ -477,7 +484,7 @@ npm --prefix editor-bundle run build
 ```
 
 Commit intentional changes to both the lockfile and generated editor bundle.
-The existing PR workflow now runs Windows/macOS tests and a separate editor
+The existing PR workflow runs Windows/macOS/Linux tests and a separate editor
 syntax/build job that also detects a stale generated bundle, retaining JUnit
 results even when tests fail. Syntax validation
 is not a full JavaScript linter, and these checks are not GUI end-to-end tests.

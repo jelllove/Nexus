@@ -23,6 +23,10 @@ unavailable, not an explicit approval of feature parity.
   Neither non-Windows flow overwrites a running app or quits automatically.
 - Missing packages, invalid URLs, registration errors and failed package opens
   must be reported, not treated as success.
+- From v1.0.11, automatic checks run every six hours and downloads require
+  explicit consent. Reminder deadlines persist in SQLite for six hours or
+  one/two/three calendar months; manual checks bypass the pause. Cancelling
+  a download must not open an installer/package and must allow a later retry.
 
 ## Architecture and data flow
 
@@ -34,6 +38,10 @@ to run unit tests. `UpdateService` retains its timer, request exclusion,
 download cache and notifications, delegating package selection to this helper.
 `MainWindow` owns user confirmation, saving notes and opening an update.
 `SettingsDialog` describes the actual platform capabilities.
+`UpdateService` distinguishes manual results and supports request cancellation;
+`MainWindow` persists reminder deadlines and manages non-modal download progress.
+The shared test network fixture produces packages for the host OS/architecture,
+so these behaviors are exercised without reverting non-Windows package handling.
 
 Application data continues to use Qt's standard writable application-data
 directory, and existing custom database paths remain supported.
@@ -55,6 +63,8 @@ the historical portable-package baseline; native packages do not replace it.
 
 The CI workflow builds, tests and packages on Windows, macOS and Ubuntu.
 Native validation results are recorded separately from local Windows checks.
+The v1.0.11 integration adds core SQLite/model regressions and an editor
+syntax/build reproducibility job to the existing native packaging gates.
 
 Release tags matching the CMake version additionally require all build/test
 and installed-package jobs to pass before publication. Windows installers are
