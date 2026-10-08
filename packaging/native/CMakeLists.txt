@@ -51,4 +51,6 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     /opt /usr /usr/bin /usr/share /usr/share/applications /usr/share/icons
     /usr/share/icons/hicolor /usr/share/icons/hicolor/256x256
     /usr/share/icons/hicolor/256x256/apps /usr/share/licenses)
+string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", fonts-noto-color-emoji")
+string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", google-noto-color-emoji-fonts")
 include(CPack)

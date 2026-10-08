@@ -62,3 +62,18 @@ Packages are not repository-signed and no apt/yum update repository is created.
 Users install local files through apt/dnf. Native Wayland hotkeys remain unsupported.
 Fedora container screenshots exercise X11 desktop/runtime behavior, not a physical
 GNOME session or SELinux policy on an installed workstation.
+
+## Validation evidence
+
+[Native CI run 37729070361](https://github.com/jelllove/Nexus/actions/runs/37729070361)
+passed all three platform builds and eight regression suites per platform, both
+portable native launch checks, and all four DEB/RPM lifecycle jobs. Package-manager
+metadata reported version 1.0.10; system integration, real editor/save screenshots,
+reinstallation, removal and user data retention were confirmed. The initial RPM
+run identified missing libatomic; it is now a declared dependency, and all runtime
+plugin/helper dependencies are checked with ldd before launch.
+
+Inspected native captures are in `docs/screenshots/ubuntu-deb.png` and
+`docs/screenshots/fedora-rpm.png`. Emoji fonts are declared runtime dependencies
+so minimal installations can render the status symbols used by the application.
+The final tag workflow repeats the native gates before publication.

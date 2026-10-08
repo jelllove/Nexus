@@ -68,6 +68,14 @@ using synthetic notes; Linux uses an Xvfb desktop.
 
 ![Nexus launched from its extracted Linux package](docs/screenshots/linux.png)
 
+**Ubuntu 24.04 DEB installation**
+
+![Nexus installed through apt](docs/screenshots/ubuntu-deb.png)
+
+**Fedora 44 RPM installation (container desktop)**
+
+![Nexus installed through dnf](docs/screenshots/fedora-rpm.png)
+
 ## Features
 
 - **3-Pane Layout** — Products (notebooks) → Tasks (pages) → Rich Editor, with a resizable splitter
