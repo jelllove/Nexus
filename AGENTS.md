@@ -39,5 +39,21 @@ Nexus is a C++17/Qt 6.8.3 desktop application with an embedded TipTap editor.
 - Do not commit API keys, local settings, personal databases or installer output.
 - Do not create issues, publish releases, push branches or change GitHub policies
   without an explicit user request.
-- Update README.md when changing build/test commands. Documentation drift is
-  not automatically checked; do not describe it as an enforced PR gate.
+- Update README.md when changing build/test commands. Release-skill frontmatter
+  and guide links are checked by `ReleasePreparationTest`; general documentation
+  drift is not automatically checked.
+
+## Release authoring
+
+- Before preparing/publishing a release or changing packaging/release CI,
+  invoke [nexus-release-authoring](.github/skills/nexus-release-authoring/SKILL.md).
+  If skill invocation is unavailable, read and follow the file directly.
+- Each release must include Windows x64 EXE/ZIP, macOS ARM64 DMG and Linux x64
+  tar.gz/DEB/RPM from one commit/version. Keep all required native evidence and
+  checksum gates; a Windows-only build is not a complete Nexus release.
+- Use the tag-triggered Build workflow, not the Windows-only `release.bat`.
+  Never weaken package requirements or omit an OS to get a green release.
+- Explicit matrix expansions must update build/deployment, native verification,
+  release preparation/tests, updater selection and support docs together.
+- Report release completion only after exact-tag CI and requested mirror
+  source/tag/asset parity are verified. If blocked, state the missing step.

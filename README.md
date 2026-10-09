@@ -425,6 +425,14 @@ Python helper/CLI regressions are part of the ordinary CTest command; Python
 
 ## Publishing a release
 
+AI contributors must follow the project
+[release-authoring skill](.github/skills/nexus-release-authoring/SKILL.md).
+[AGENTS.md](AGENTS.md) and the automatically loaded
+[Copilot instructions](.github/copilot-instructions.md) require this workflow
+for release and packaging work. It preserves the Windows/macOS/Linux package
+matrix; `ReleasePreparationTest` checks the skill's discovery wiring and that
+each of the six required packages blocks publication when missing or empty.
+
 The primary repository is `jelllove/Nexus`; `qinqiangxu/Nexus` is the private
 mirror previously named `qinqingxu/Nexus`.
 Release integration is pushed on `agents/release-*`; cross-platform work may

@@ -15,6 +15,12 @@ SPEC = importlib.util.spec_from_file_location("prepare_release", ROOT / "ci" / "
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 VERSION = re.search(r"project\(Nexus VERSION ([0-9.]+)", (ROOT / "CMakeLists.txt").read_text())[1]
+PACKAGE_NAMES = {
+    "Windows": [f"Nexus-Setup-v{VERSION}-x64.exe", f"Nexus-{VERSION}-Windows-x64.zip"],
+    "macOS": [f"Nexus-{VERSION}-macOS-arm64.dmg"],
+    "Linux": [f"Nexus-{VERSION}-Linux-x64.tar.gz",
+              f"Nexus-{VERSION}-Linux-x64.deb", f"Nexus-{VERSION}-Linux-x64.rpm"],
+}
 
 
 def sample_png():
@@ -29,13 +35,7 @@ def sample_png():
 
 class ReleasePreparationTest(unittest.TestCase):
     def create_input(self, root):
-        names = {
-            "Windows": [f"Nexus-Setup-v{VERSION}-x64.exe", f"Nexus-{VERSION}-Windows-x64.zip"],
-            "macOS": [f"Nexus-{VERSION}-macOS-arm64.dmg"],
-            "Linux": [f"Nexus-{VERSION}-Linux-x64.tar.gz",
-                      f"Nexus-{VERSION}-Linux-x64.deb", f"Nexus-{VERSION}-Linux-x64.rpm"],
-        }
-        for system, packages in names.items():
+        for system, packages in PACKAGE_NAMES.items():
             directory = root / f"Nexus-{system}"
             directory.mkdir()
             for name in packages:
@@ -73,13 +73,42 @@ class ReleasePreparationTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), digest)
 
     def test_missing_platform_package_blocks_publication(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.create_input(root)
-            (root / "Nexus-Linux" / f"Nexus-{VERSION}-Linux-x64.tar.gz").unlink()
-            with self.assertRaisesRegex(ValueError, "Required release package"):
-                MODULE.prepare_release(root, root / "release", "v" + VERSION)
-            self.assertFalse((root / "release").exists())
+        for system, packages in PACKAGE_NAMES.items():
+            for name in packages:
+                for state in ("missing", "empty"):
+                    with self.subTest(package=name, state=state):
+                        with tempfile.TemporaryDirectory() as directory:
+                            root = Path(directory)
+                            self.create_input(root)
+                            package = root / f"Nexus-{system}" / name
+                            if state == "missing":
+                                package.unlink()
+                            else:
+                                package.write_bytes(b"")
+                            with self.assertRaisesRegex(ValueError, "Required release package"):
+                                MODULE.prepare_release(root, root / "release", "v" + VERSION)
+                            self.assertFalse((root / "release").exists())
+
+    def test_project_release_skill_is_discoverable_and_wired(self):
+        skill = ROOT / ".github" / "skills" / "nexus-release-authoring" / "SKILL.md"
+        self.assertTrue(skill.is_file(), "Project release-authoring skill is missing.")
+        content = skill.read_text(encoding="utf-8")
+        self.assertTrue(content.startswith("---\n"), "Skill must have YAML frontmatter.")
+        sections = content.split("---", 2)
+        self.assertEqual(len(sections), 3, "Skill frontmatter must be closed.")
+        name = re.search(r"^name:\s*([\w-]+)\s*$", sections[1], re.MULTILINE)
+        self.assertIsNotNone(name, "Skill name is missing.")
+        self.assertEqual(name[1], skill.parent.name)
+        description = re.search(r"^description:\s*(\S.*)$", sections[1], re.MULTILINE)
+        self.assertIsNotNone(description, "Skill description is missing.")
+        self.assertIn("release", description[1].lower())
+        self.assertTrue(sections[2].strip(), "Skill body must not be empty.")
+        reference = skill.relative_to(ROOT).as_posix()
+        for path in (ROOT / "AGENTS.md", ROOT / ".github" / "copilot-instructions.md",
+                     ROOT / "README.md"):
+            with self.subTest(guide=path.name):
+                self.assertTrue(path.is_file(), f"Release guide is missing: {path.name}")
+                self.assertIn(reference, path.read_text(encoding="utf-8"))
 
     def test_failed_native_verification_blocks_publication(self):
         with tempfile.TemporaryDirectory() as directory:
