@@ -71,8 +71,9 @@ and installed-package jobs to pass before publication. Windows installers are
 compiled from the CMake-deployed runtime, preserving the existing root-executable
 layout so upgrades replace the previous executable and keep shortcuts valid.
 Release assets include checksums, native PNGs and diagnostic ZIPs.
-The primary repository publishes verified packages; a private qinqingxu
-mirror receives the same code/tag and assets without duplicate CI execution.
+The primary repository publishes verified packages; the private qinqiangxu
+mirror (previously qinqingxu) receives the same code/tag and assets without
+duplicate CI execution.
 
 ## Validation evidence
 

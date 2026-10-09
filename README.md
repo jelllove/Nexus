@@ -13,19 +13,20 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 Download native packages from the
 [primary releases](https://github.com/jelllove/Nexus/releases).
 An access-controlled mirror is published to
-[qinqingxu/Nexus](https://github.com/qinqingxu/Nexus/releases) using the same
+[qinqiangxu/Nexus](https://github.com/qinqiangxu/Nexus/releases) using the same
 verified commit and assets.
+The previous `qinqingxu/Nexus` address redirects to this renamed mirror.
 
-### v1.0.11 packages
+### v1.0.12 packages
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.11-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.11-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.11-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.11-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.11-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.11-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.11-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.11-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.12-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.12-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.12-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.12-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.12-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.12-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.12-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.12-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -34,10 +35,10 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.11 release notes](docs/release-notes-v1.0.11.md).
-This release integrates core persistence regressions and consent-based update
-reminders into the existing cross-platform application. Earlier releases and
-their assets remain unchanged.
+notes, not personal data. See [v1.0.12 release notes](docs/release-notes-v1.0.12.md).
+This release fixes the Windows updater's temporary-file lock and opens the
+official download website when a download or package launch fails.
+Earlier releases and their assets remain unchanged.
 
 ### Linux package-manager installation
 
@@ -47,9 +48,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.11-Linux-x64.deb
+sudo apt install ./Nexus-1.0.12-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.11-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.12-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -309,10 +310,11 @@ Before trying a new local build, allow pending edits to autosave, then use
 Downloads use a unique `Nexus-Update-XXXXXX.exe` filename in the current user's
 temporary directory. The download file must release its writable handle before
 the update-ready notification; calling `QTemporaryFile::close()` alone does not
-release that handle. A regression test launches a harmless test executable
+release that handle. v1.0.12 releases it before notifying the UI.
+A regression test launches a harmless test executable
 directly from that notification to verify this handoff.
 
-In v1.0.11, choosing **Install now** immediately after downloading can fail
+In v1.0.11 and earlier, choosing **Install now** immediately after downloading can fail
 because the file is still open. Choose **Later** first, then use
 **Help > Check for Updates** to reopen the cached download and choose
 **Install now**. Alternatively, save your notes, quit Nexus and manually run
@@ -423,7 +425,8 @@ Python helper/CLI regressions are part of the ordinary CTest command; Python
 
 ## Publishing a release
 
-The primary repository is `jelllove/Nexus`; `qinqingxu/Nexus` is a private mirror.
+The primary repository is `jelllove/Nexus`; `qinqiangxu/Nexus` is the private
+mirror previously named `qinqingxu/Nexus`.
 Release integration is pushed on `agents/release-*`; cross-platform work may
 also use `agents/macos-support`. After verification, `main`
 can be fast-forwarded to the same commit without rewriting existing history.
@@ -431,11 +434,11 @@ Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/release-v1.0.11
+git push origin agents/release-v1.0.12
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.11 -m "Nexus v1.0.11"
-git push origin v1.0.11
+git tag -a v1.0.12 -m "Nexus v1.0.12"
+git push origin v1.0.12
 ```
 
 The tag workflow checks editor syntax and bundle reproducibility, runs all nine
