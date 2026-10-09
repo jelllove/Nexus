@@ -75,6 +75,7 @@ private:
     void toggleVisibility();
     void checkForUpdates();
     void closeDownloadProgress();
+    void showUpdateFailure(const QString &title, const QString &message);
     bool prepareMarkdownPayload(PreparedMarkdownPayload &payload, const QString &actionName);
     bool promptExportScopeDialog(bool &exportAllProducts, int &selectedProductId, bool &includeDescription);
     bool promptTaskSelectionDialog(

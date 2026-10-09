@@ -32,9 +32,17 @@ class TestUrlHandler : public QObject
     Q_OBJECT
 public:
     QUrl opened;
-    ~TestUrlHandler() override { QDesktopServices::unsetUrlHandler("file"); }
+    QList<QUrl> requests;
+    explicit TestUrlHandler(const QString &scheme = "file")
+        : m_scheme(scheme)
+    {
+        QDesktopServices::setUrlHandler(m_scheme, this, "openUrl");
+    }
+    ~TestUrlHandler() override { QDesktopServices::unsetUrlHandler(m_scheme); }
 public slots:
-    void openUrl(const QUrl &url) { opened = url; }
+    void openUrl(const QUrl &url) { opened = url; requests.append(url); }
+private:
+    QString m_scheme;
 };
 
 class UpdateUiTest : public QObject
@@ -48,6 +56,9 @@ class UpdateUiTest : public QObject
     int m_updateAnswers = 0;
     int m_expectedMessageAnswers = 0;
     QPointer<QTimer> m_answerTimer;
+    TestUrlHandler m_downloadPageHandler{"https"};
+    QString m_lastMessageText;
+    Qt::TextInteractionFlags m_lastMessageFlags;
     int m_taskId = -1;
     int m_subtaskId = -1;
 
@@ -146,6 +157,8 @@ class UpdateUiTest : public QObject
             if (!box || pending->isEmpty()) return;
             for (auto *button : box->buttons()) {
                 if (button->text() == pending->first()) {
+                    m_lastMessageText = box->text();
+                    m_lastMessageFlags = box->textInteractionFlags();
                     pending->removeFirst();
                     --m_expectedMessageAnswers;
                     button->click();
@@ -195,6 +208,10 @@ private slots:
         db.setSetting("update_reminder_after", "");
         m_updateAnswers = 0;
         m_expectedMessageAnswers = 0;
+        m_lastMessageText.clear();
+        m_lastMessageFlags = Qt::NoTextInteraction;
+        m_downloadPageHandler.requests.clear();
+        QDesktopServices::setUrlHandler("https", &m_downloadPageHandler, "openUrl");
         createWindow();
         QVERIFY(!m_updater->findChild<QTimer *>("updateCheckTimer")->isActive());
     }
@@ -240,6 +257,7 @@ private slots:
         QVERIFY(deadline.isValid());
         QVERIFY(deadline >= (months ? before.addMonths(months) : before.addSecs(6 * 3600)));
         QVERIFY(deadline <= (months ? after.addMonths(months) : after.addSecs(6 * 3600)));
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
     }
 
     void snoozeSurvivesReopenAndSuppressesAllAutomaticVersions()
@@ -403,20 +421,67 @@ private slots:
         QVERIFY(cancel);
         cancel->click();
         QCOMPARE(cancelled.count(), 2);
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
+    }
+
+    void downloadFailureClosesProgressAndShowsError_data()
+    {
+        QTest::addColumn<bool>("networkFailure");
+        QTest::newRow("network-error") << true;
+        QTest::newRow("empty-installer") << false;
     }
 
     void downloadFailureClosesProgressAndShowsError()
     {
+        QFETCH(bool, networkFailure);
         answerUpdate(true);
         checkRelease(true);
         QVERIFY(downloadDialog());
-        QTest::ignoreMessage(QtWarningMsg, "Update: Download failed: simulated failure");
+        QSignalSpy quitting(qApp, &QCoreApplication::aboutToQuit);
+        QTest::ignoreMessage(QtWarningMsg, networkFailure
+            ? "Update: Download failed: simulated failure" : "Update: Downloaded installer is empty");
         answerDialogs({"OK"});
-        m_network->reply->finish({}, QNetworkReply::TimeoutError);
+        m_network->reply->finish({}, networkFailure
+            ? QNetworkReply::TimeoutError : QNetworkReply::NoError);
         QVERIFY(!m_updater->isBusy());
         QVERIFY(m_downloads.isEmpty());
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QVERIFY(!downloadDialog());
+        QCOMPARE(m_downloadPageHandler.requests,
+                 QList<QUrl>{QUrl("https://www.jelllove.com/products/nexus.html")});
+        QVERIFY(m_lastMessageText.contains(m_downloadPageHandler.requests.first().toString()));
+        QVERIFY(m_lastMessageFlags.testFlag(Qt::TextSelectableByMouse));
+        QCOMPARE(quitting.count(), 0);
+    }
+
+    void backgroundCheckFailureDoesNotOpenDownloadPage()
+    {
+        m_updater->setAutomaticChecksEnabled(true);
+        QTRY_COMPARE(m_network->requests.size(), 1);
+        QTest::ignoreMessage(QtWarningMsg, "Update: Update check failed: simulated failure");
+        m_network->reply->finish({}, QNetworkReply::TimeoutError);
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
+        QVERIFY(!m_updater->isBusy());
+        QVERIFY(!downloadDialog());
+    }
+
+    void browserFailureKeepsManualDownloadUrlVisible()
+    {
+        answerUpdate(true);
+        checkRelease(true);
+        QDesktopServices::setUrlHandler("https", &m_downloadPageHandler, "missingSlot");
+        QTest::ignoreMessage(QtWarningMsg, "Update: Download failed: simulated failure");
+        QTest::ignoreMessage(QtWarningMsg,
+                            QRegularExpression("^QMetaObject::invokeMethod: No such method"));
+        QTest::ignoreMessage(QtWarningMsg,
+                            QRegularExpression("^Update: Failed to open manual download page:"));
+        answerDialogs({"OK"});
+        m_network->reply->finish({}, QNetworkReply::TimeoutError);
+        QVERIFY(m_lastMessageText.contains("Could not open your browser"));
+        QVERIFY(m_lastMessageText.contains("https://www.jelllove.com/products/nexus.html"));
+        QVERIFY(m_lastMessageText.contains("Download failed: simulated failure"));
+        QVERIFY(m_lastMessageFlags.testFlag(Qt::TextSelectableByMouse));
+        QVERIFY(!m_updater->isBusy());
     }
 
     void invalidDownloadUrlClosesProgressAndShowsError()
@@ -429,6 +494,8 @@ private slots:
         QVERIFY(m_downloads.isEmpty());
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QVERIFY(!downloadDialog());
+        QCOMPARE(m_downloadPageHandler.requests,
+                 QList<QUrl>{QUrl("https://www.jelllove.com/products/nexus.html")});
         m_answerTimer->deleteLater();
         m_answerTimer.clear();
     }
@@ -483,6 +550,7 @@ private slots:
         QVERIFY(triggered);
         QCOMPARE(quitting.count(), 0);
         QVERIFY(!m_updater->isBusy());
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
     }
 
     void installIsBlockedWhenNoteCannotBeSaved()
@@ -502,6 +570,7 @@ private slots:
         QCOMPARE(quitting.count(), 0);
         QVERIFY(editor->saveCurrentContent());
         QCOMPARE(DatabaseManager::instance().getSubtask(m_subtaskId).content, "<p>Unsaved edit</p>");
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
     }
 
     void failedInstallerLaunchKeepsApplicationOpen()
@@ -511,6 +580,9 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(m_window.get(), "onDownloadFinished",
                                           Q_ARG(QString, m_data.filePath("missing-installer.exe"))));
         QCOMPARE(quitting.count(), 0);
+        QCOMPARE(m_downloadPageHandler.requests,
+                 QList<QUrl>{QUrl("https://www.jelllove.com/products/nexus.html")});
+        QVERIFY(m_lastMessageText.contains("missing-installer.exe"));
     }
 
     void closingWithoutTraySavesAndSaveFailureBlocksClose()
@@ -543,7 +615,6 @@ private slots:
         QSKIP("Windows uses an executable installer, not desktop URL handling.");
 #else
         TestUrlHandler handler;
-        QDesktopServices::setUrlHandler("file", &handler, "openUrl");
         auto *editor = m_window->findChild<EditorPane *>();
         editor->loadTask(m_taskId);
         editor->findChild<EditorBridge *>()->setContent("<p>Save before opening update</p>");
@@ -563,6 +634,7 @@ private slots:
         QCOMPARE(quitting.count(), 0);
         QCOMPARE(DatabaseManager::instance().getTask(m_taskId).content,
                  "<p>Save before opening update</p>");
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
 #endif
     }
 

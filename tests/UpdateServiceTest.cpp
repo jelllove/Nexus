@@ -1,6 +1,7 @@
 #include "services/UpdateService.h"
 #include "FakeUpdateNetwork.h"
 #include <QFile>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QTimer>
 #include <QtTest>
@@ -206,6 +207,47 @@ private slots:
         QVERIFY(QFile::remove(path));
         service.downloadAndInstall(installerUrl());
         QCOMPARE(network.requests.size(), 2);
+    }
+
+    void completedDownloadCanLaunchBeforeSignalReturns()
+    {
+#ifdef Q_OS_WIN
+        QFile executable(QCoreApplication::applicationFilePath());
+        QVERIFY(executable.open(QIODevice::ReadOnly));
+        const QByteArray payload = executable.readAll();
+        QVERIFY(!payload.isEmpty());
+        executable.close();
+
+        TestNetwork network;
+        UpdateService service(&network);
+        QString downloadedPath;
+        QString launchError;
+        bool started = false;
+        bool finished = false;
+        int exitCode = -1;
+        connect(&service, &UpdateService::downloadFinished, this,
+                [&](const QString &path) {
+            downloadedPath = path;
+            QProcess process;
+            process.start(path, {"-functions"});
+            started = process.waitForStarted(5000);
+            launchError = process.errorString();
+            if (started) {
+                finished = process.waitForFinished(5000);
+                exitCode = process.exitCode();
+            }
+        }, Qt::DirectConnection);
+
+        service.downloadAndInstall(installerUrl());
+        network.reply->finish(payload);
+        QVERIFY(!downloadedPath.isEmpty());
+        QVERIFY(QFile::remove(downloadedPath));
+        QVERIFY2(started, qPrintable(launchError));
+        QVERIFY(finished);
+        QCOMPARE(exitCode, 0);
+#else
+        QSKIP("Windows cannot execute a file while its writable handle is still open.");
+#endif
     }
 
     void failedDownloadAllowsBackgroundRetry_data()

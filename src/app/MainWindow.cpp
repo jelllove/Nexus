@@ -1180,7 +1180,7 @@ void MainWindow::setupUpdates()
                 closeDownloadProgress();
                 statusBar()->showMessage("Update: " + msg, 5000);
                 if (downloading) {
-                    QMessageBox::warning(this, "Update Download Failed", msg);
+                    showUpdateFailure("Update Download Failed", msg);
                 }
             });
     connect(&updater, &UpdateService::downloadCanceled, this, [this]() {
@@ -1310,6 +1310,26 @@ void MainWindow::closeDownloadProgress()
     m_downloadProgress.clear();
 }
 
+void MainWindow::showUpdateFailure(const QString &title, const QString &message)
+{
+    const QUrl downloadPage("https://www.jelllove.com/products/nexus.html");
+    QString instructions;
+    if (QDesktopServices::openUrl(downloadPage)) {
+        instructions = "The Nexus download page has been opened in your browser.";
+    } else {
+        qWarning().noquote() << "Update: Failed to open manual download page:"
+                             << downloadPage.toString();
+        instructions = "Could not open your browser. Copy this address to download the update manually.";
+    }
+    QMessageBox warning(QMessageBox::Warning, title,
+        message + "\n\n" + instructions + "\n" + downloadPage.toString()
+            + "\n\nNexus will stay open. Save your notes and quit Nexus before installing the update.",
+        QMessageBox::Ok, this);
+    warning.setTextFormat(Qt::PlainText);
+    warning.setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    warning.exec();
+}
+
 void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
 {
     if (!m_downloadProgress) return;
@@ -1390,7 +1410,7 @@ void MainWindow::onDownloadFinished(const QString &installerPath)
         statusBar()->showMessage("Update opened. Quit Nexus before installing the new version.", 10000);
 #endif
     } else {
-        QMessageBox::warning(this, "Update Error",
+        showUpdateFailure("Update Error",
             "Failed to open the update.\n"
             "The update was saved to:\n" + installerPath);
     }

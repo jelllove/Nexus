@@ -177,19 +177,22 @@ void UpdateService::downloadAndInstall(const QString &downloadUrl)
             return;
         }
         const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-        QTemporaryFile file(QDir(tempDir).filePath(
-            "Nexus-Update-XXXXXX" + UpdatePackage::extension(UpdatePackage::currentPlatform())));
-        if (!file.open()) {
-            emit error("Failed to save installer: " + file.errorString());
-            return;
+        QString installerPath;
+        {
+            QTemporaryFile file(QDir(tempDir).filePath(
+                "Nexus-Update-XXXXXX" + UpdatePackage::extension(UpdatePackage::currentPlatform())));
+            if (!file.open()) {
+                emit error("Failed to save installer: " + file.errorString());
+                return;
+            }
+            if (file.write(data) != data.size() || !file.flush()) {
+                emit error("Failed to write installer: " + file.errorString());
+                return;
+            }
+            installerPath = file.fileName();
+            file.setAutoRemove(false);
         }
-        if (file.write(data) != data.size() || !file.flush()) {
-            emit error("Failed to write installer: " + file.errorString());
-            return;
-        }
-        const QString installerPath = file.fileName();
-        file.close();
-        file.setAutoRemove(false);
+        // QTemporaryFile::close() retains its native handle until destruction.
         m_installerUrl = downloadUrl;
         m_installerPath = installerPath;
         emit downloadFinished(installerPath);

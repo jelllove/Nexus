@@ -298,9 +298,26 @@ Before trying a new local build, allow pending edits to autosave, then use
 - **Yes** opens a download dialog showing percentage and downloaded/total size. If the server does not report a total, progress is indeterminate with the received size. **Cancel** or closing the download window aborts the download without starting an installer, and manual checks can retry.
 - Checks and downloads cannot overlap. Background errors are logged and shown in the status bar, not an error popup; the next scheduled check can retry.
 - Download failures close the progress dialog and show an error. No partial installer is launched.
+- Download/save failures and failures to launch/open a downloaded package automatically open the [official Nexus download page](https://www.jelllove.com/products/nexus.html) for manual installation. Nexus stays open; the error dialog includes a selectable download URL and explains if the browser could not be opened.
+- Cancelling or deferring an update, background check errors and note-save failures do not open the download page. Nexus detects download and package-launch failures, not failures inside an external installer after it has successfully started.
 - After download, Windows **Install now** saves the current task or subtask before launching the installer and quitting. On macOS/Linux, **Open update** saves the note, opens the DMG/folder, and keeps Nexus running. Quit Nexus before manually installing the replacement. Save/open failures leave Nexus open.
 - Choose **Later** to keep working; use **Help > Check for Updates** to reopen the downloaded update without downloading it again during the same session.
 - Checking requires Nexus to be running and the computer awake. This is not a background service; the Windows installer may require UAC confirmation.
+
+### Windows installer launch troubleshooting
+
+Downloads use a unique `Nexus-Update-XXXXXX.exe` filename in the current user's
+temporary directory. The download file must release its writable handle before
+the update-ready notification; calling `QTemporaryFile::close()` alone does not
+release that handle. A regression test launches a harmless test executable
+directly from that notification to verify this handoff.
+
+In v1.0.11, choosing **Install now** immediately after downloading can fail
+because the file is still open. Choose **Later** first, then use
+**Help > Check for Updates** to reopen the cached download and choose
+**Install now**. Alternatively, save your notes, quit Nexus and manually run
+the trusted downloaded installer. Changing the filename or elevating Nexus is
+not needed to resolve this file-handle lifetime issue.
 
 Updates only select matching OS/CPU packages. Supported release asset names:
 
