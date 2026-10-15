@@ -126,7 +126,9 @@ DatabaseManager& DatabaseManager::instance()
 
 bool DatabaseManager::initialize(const QString &dbPath)
 {
-    m_db = QSqlDatabase::addDatabase("QSQLITE");
+    m_db = QSqlDatabase::contains() ? QSqlDatabase::database()
+                                   : QSqlDatabase::addDatabase("QSQLITE");
+    m_db.close();
 
     QString path = dbPath;
     if (path.isEmpty()) {
@@ -515,6 +517,91 @@ bool DatabaseManager::migrateDatabase()
         qInfo() << "Migration v9: ensured subtasks work_status and backfilled from completed";
     }
 
+    if (dbVersion < 10) {
+        if (!m_db.transaction()) {
+            qCritical() << "Failed to start operation-history migration:" << m_db.lastError().text();
+            return false;
+        }
+        if (!createOperationLog() || !setSetting("db_version", "10") || !m_db.commit()) {
+            qCritical() << "Failed to migrate database operation history:" << m_db.lastError().text();
+            if (!m_db.rollback())
+                qWarning() << "Failed to roll back operation-history migration:" << m_db.lastError().text();
+            return false;
+        }
+        qInfo() << "Migration v10: enabled database operation history";
+    }
+
+    return true;
+}
+
+bool DatabaseManager::createOperationLog()
+{
+    QSqlQuery query(m_db);
+    if (!query.exec(
+            "CREATE TABLE database_operations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),"
+            "table_name TEXT NOT NULL,"
+            "record_id TEXT NOT NULL,"
+            "operation TEXT NOT NULL CHECK(operation IN ('INSERT', 'UPDATE', 'DELETE')),"
+            "changed_fields TEXT NOT NULL,"
+            "old_status TEXT, new_status TEXT,"
+            "old_work_status INTEGER, new_work_status INTEGER)")) {
+        qCritical() << "Failed to create database operation history:" << query.lastError().text();
+        return false;
+    }
+    if (!query.exec("CREATE INDEX database_operations_record "
+                    "ON database_operations(table_name, record_id, id)")) {
+        qCritical() << "Failed to index database operation history:" << query.lastError().text();
+        return false;
+    }
+
+    const QStringList tables = {"products", "tasks", "subtasks", "task_content_history", "settings"};
+    for (const auto &table : tables) {
+        if (!query.exec("PRAGMA table_info(" + table + ")")) {
+            qCritical() << "Failed to inspect audited table:" << table << query.lastError().text();
+            return false;
+        }
+        QStringList columns;
+        while (query.next())
+            columns << query.value(1).toString();
+        if (columns.isEmpty()) {
+            qCritical() << "Audited database table is missing:" << table;
+            return false;
+        }
+        const QString key = table == "settings" ? "key" : "id";
+        QStringList changes;
+        for (const auto &column : columns) {
+            changes << QString("CASE WHEN OLD.\"%1\" IS NOT NEW.\"%1\" "
+                               "THEN '%1,' ELSE '' END").arg(column);
+        }
+        for (const auto &operation : QStringList{"INSERT", "UPDATE", "DELETE"}) {
+            const QString row = operation == "DELETE" ? "OLD" : "NEW";
+            const QString changedFields = operation == "UPDATE"
+                ? "rtrim(" + changes.join(" || ") + ", ',')"
+                : "'" + columns.join(',') + "'";
+            auto statusValue = [&](const QString &column, bool old) {
+                if (!columns.contains(column)
+                    || (old && operation == "INSERT") || (!old && operation == "DELETE"))
+                    return QString("NULL");
+                return (old ? QString("OLD.") : QString("NEW.")) + column;
+            };
+            // Triggers share the write's transaction, including cascades and caller-owned rollbacks.
+            const QString sql = QString(
+                "CREATE TRIGGER audit_%1_%2 AFTER %3 ON %1 BEGIN "
+                "INSERT INTO database_operations(table_name, record_id, operation, changed_fields, "
+                "old_status, new_status, old_work_status, new_work_status) "
+                "VALUES('%1', CAST(%4.%5 AS TEXT), '%3', %6, %7, %8, %9, %10); END")
+                .arg(table, operation.toLower(), operation, row, key, changedFields,
+                     statusValue("status", true), statusValue("status", false),
+                     statusValue("work_status", true), statusValue("work_status", false));
+            if (!query.exec(sql)) {
+                qCritical() << "Failed to enable operation logging:" << table << operation
+                            << query.lastError().text();
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -1565,6 +1652,102 @@ void DatabaseManager::cleanupOldBackups(int maxBackups)
 
 // --- Settings ---
 
+bool DatabaseManager::collectTaskActivity(const QDateTime &start, const QDateTime &endExclusive,
+                                        ActivityTimeBasis basis, QList<TaskActivity> &items,
+                                        QString &error)
+{
+    items.clear();
+    error.clear();
+    auto fail = [&](const QString &message) {
+        items.clear();
+        error = message;
+        qWarning() << "Failed to collect task activity:" << message;
+        return false;
+    };
+    if (!start.isValid() || !endExclusive.isValid() || start >= endExclusive)
+        return fail("Invalid activity date range.");
+    if (basis != ActivityTimeBasis::Created && basis != ActivityTimeBasis::Modified
+        && basis != ActivityTimeBasis::CreatedOrModified)
+        return fail("Invalid activity time basis.");
+
+    const QString created = "(julianday(a.created_at) >= julianday(:start) "
+                            "AND julianday(a.created_at) < julianday(:end))";
+    const QString modified = "((julianday(a.updated_at) >= julianday(:start) "
+                             "AND julianday(a.updated_at) < julianday(:end)) OR EXISTS ("
+                             "SELECT 1 FROM database_operations o WHERE o.table_name = a.table_name "
+                             "AND o.record_id = CAST(a.id AS TEXT) AND o.operation = 'UPDATE' "
+                             "AND julianday(o.occurred_at) >= julianday(:start) "
+                             "AND julianday(o.occurred_at) < julianday(:end)))";
+    const QString predicate = basis == ActivityTimeBasis::Created ? created
+        : basis == ActivityTimeBasis::Modified ? modified : "(" + created + " OR " + modified + ")";
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT * FROM ("
+        "SELECT 'tasks' AS table_name, t.id, p.name AS product_name, '' AS parent_title, "
+        "t.title, t.content, t.created_at, t.updated_at, t.status, t.work_status "
+        "FROM tasks t JOIN products p ON p.id = t.product_id "
+        "UNION ALL "
+        "SELECT 'subtasks', s.id, p.name, t.title, s.title, s.content, "
+        "s.created_at, s.updated_at, t.status, s.work_status "
+        "FROM subtasks s JOIN tasks t ON t.id = s.task_id JOIN products p ON p.id = t.product_id"
+        ") a WHERE " + predicate + " ORDER BY a.table_name, a.id LIMIT 1001");
+    query.bindValue(":start", start.toUTC().toString(Qt::ISODateWithMs));
+    query.bindValue(":end", endExclusive.toUTC().toString(Qt::ISODateWithMs));
+    if (!query.exec()) return fail(query.lastError().text());
+    auto utcDate = [](QString value) {
+        value.replace(' ', 'T');
+        if (!value.endsWith('Z')) value += 'Z';
+        return QDateTime::fromString(value, Qt::ISODateWithMs);
+    };
+    while (query.next()) {
+        TaskActivity item;
+        item.tableName = query.value(0).toString();
+        item.id = query.value(1).toInt();
+        item.productName = query.value(2).toString();
+        item.parentTitle = query.value(3).toString();
+        item.title = query.value(4).toString();
+        item.content = query.value(5).toString();
+        item.createdAt = utcDate(query.value(6).toString());
+        item.updatedAt = utcDate(query.value(7).toString());
+        item.lifecycleStatus = query.value(8).toString();
+        item.workStatus = query.value(9).toInt();
+        items.append(item);
+    }
+    if (query.lastError().isValid()) return fail(query.lastError().text());
+    if (items.size() > 1000)
+        return fail("The selected range is too large (more than 1000 items). Choose a shorter range.");
+    query.finish();
+    int eventCount = 0;
+    for (auto &item : items) {
+        query.prepare("SELECT occurred_at, operation, changed_fields, old_status, new_status, "
+                      "old_work_status, new_work_status FROM database_operations "
+                      "WHERE table_name = ? AND record_id = ? "
+                      "AND julianday(occurred_at) >= julianday(?) "
+                      "AND julianday(occurred_at) < julianday(?) ORDER BY id LIMIT 2001");
+        query.addBindValue(item.tableName);
+        query.addBindValue(QString::number(item.id));
+        query.addBindValue(start.toUTC().toString(Qt::ISODateWithMs));
+        query.addBindValue(endExclusive.toUTC().toString(Qt::ISODateWithMs));
+        if (!query.exec()) return fail(query.lastError().text());
+        while (query.next()) {
+            if (++eventCount > 2000)
+                return fail("The selected range is too large (more than 2000 events). Choose a shorter range.");
+            ActivityChange change;
+            change.occurredAt = utcDate(query.value(0).toString());
+            change.operation = query.value(1).toString();
+            change.changedFields = query.value(2).toString();
+            change.oldStatus = query.value(3).toString();
+            change.newStatus = query.value(4).toString();
+            change.oldWorkStatus = query.value(5).isNull() ? -1 : query.value(5).toInt();
+            change.newWorkStatus = query.value(6).isNull() ? -1 : query.value(6).toInt();
+            item.changes.append(change);
+        }
+        if (query.lastError().isValid()) return fail(query.lastError().text());
+        query.finish();
+    }
+    return true;
+}
+
 QString DatabaseManager::getSetting(const QString &key, const QString &defaultValue)
 {
     QSqlQuery query(m_db);
@@ -1579,7 +1762,8 @@ QString DatabaseManager::getSetting(const QString &key, const QString &defaultVa
 bool DatabaseManager::setSetting(const QString &key, const QString &value)
 {
     QSqlQuery query(m_db);
-    query.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+    query.prepare("INSERT INTO settings (key, value) VALUES (?, ?) "
+                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value");
     query.addBindValue(key);
     query.addBindValue(value);
     if (!query.exec()) {

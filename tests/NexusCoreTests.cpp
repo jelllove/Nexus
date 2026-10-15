@@ -3,6 +3,8 @@
 #include <QSignalSpy>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSqlRecord>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include "db/DatabaseManager.h"
@@ -31,6 +33,16 @@ private slots:
     void taskModelReordersWithinPriority();
     void taskModelReportsReorderFailure();
     void deletedTaskModelReportsDeletedStatus();
+    void operationHistoryCoversTables_data();
+    void operationHistoryCoversTables();
+    void operationHistoryTracksStatuses();
+    void operationHistoryTracksOrderingAndMoves();
+    void operationHistorySurvivesCascadedDeletion();
+    void operationHistoryRollsBackWithWrites();
+    void operationHistoryFailureRejectsWrite();
+    void operationHistoryDoesNotRecordReads();
+    void operationHistoryTracksSettingReplacement();
+    void operationHistoryMigratesExistingDatabase();
 };
 
 void NexusCoreTests::initTestCase()
@@ -47,6 +59,313 @@ void NexusCoreTests::init()
              qPrintable(query.lastError().text()));
     QVERIFY2(query.exec("DELETE FROM products"), qPrintable(query.lastError().text()));
     QVERIFY2(query.exec("DELETE FROM settings"), qPrintable(query.lastError().text()));
+    if (QSqlDatabase::database().tables().contains("database_operations")) {
+        QVERIFY2(query.exec("DELETE FROM database_operations"),
+                 qPrintable(query.lastError().text()));
+    }
+}
+
+void NexusCoreTests::operationHistoryCoversTables_data()
+{
+    QTest::addColumn<QString>("table");
+    QTest::addColumn<QString>("insert");
+    QTest::addColumn<QString>("update");
+    QTest::addColumn<QString>("remove");
+    QTest::addColumn<QString>("changedField");
+    QTest::newRow("products") << "products"
+        << "INSERT INTO products (id, name) VALUES (100, 'private title')"
+        << "UPDATE products SET name = 'private replacement' WHERE id = 100"
+        << "DELETE FROM products WHERE id = 100" << "name";
+    QTest::newRow("tasks") << "tasks"
+        << "INSERT INTO tasks (id, product_id, title) VALUES (100, %1, 'private title')"
+        << "UPDATE tasks SET title = 'private replacement' WHERE id = 100"
+        << "DELETE FROM tasks WHERE id = 100" << "title";
+    QTest::newRow("subtasks") << "subtasks"
+        << "INSERT INTO subtasks (id, task_id, title) VALUES (100, %2, 'private title')"
+        << "UPDATE subtasks SET title = 'private replacement' WHERE id = 100"
+        << "DELETE FROM subtasks WHERE id = 100" << "title";
+    QTest::newRow("history") << "task_content_history"
+        << "INSERT INTO task_content_history (id, task_id, content) VALUES (100, %2, 'private content')"
+        << "UPDATE task_content_history SET content = 'private replacement' WHERE id = 100"
+        << "DELETE FROM task_content_history WHERE id = 100" << "content";
+    QTest::newRow("settings") << "settings"
+        << "INSERT INTO settings (key, value) VALUES ('api_key', 'private secret')"
+        << "UPDATE settings SET value = 'private replacement' WHERE key = 'api_key'"
+        << "DELETE FROM settings WHERE key = 'api_key'" << "value";
+}
+
+void NexusCoreTests::operationHistoryCoversTables()
+{
+    QFETCH(QString, table);
+    QFETCH(QString, insert);
+    QFETCH(QString, update);
+    QFETCH(QString, remove);
+    QFETCH(QString, changedField);
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Fixture");
+    const int task = db.addTask(product, "Fixture");
+    QVERIFY(product > 0 && task > 0);
+    QSqlQuery query;
+    QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
+    const auto before = QDateTime::currentDateTimeUtc();
+    insert.replace("%1", QString::number(product));
+    insert.replace("%2", QString::number(task));
+    QVERIFY2(query.exec(insert), qPrintable(query.lastError().text()));
+    QVERIFY2(query.exec(update), qPrintable(query.lastError().text()));
+    QVERIFY2(query.exec(remove), qPrintable(query.lastError().text()));
+    const auto after = QDateTime::currentDateTimeUtc();
+    QVERIFY2(query.exec("SELECT occurred_at, table_name, record_id, operation, changed_fields "
+                        "FROM database_operations ORDER BY id"), qPrintable(query.lastError().text()));
+    for (const auto &operation : QStringList{"INSERT", "UPDATE", "DELETE"}) {
+        QVERIFY(query.next());
+        const QString timestamp = query.value(0).toString();
+        QVERIFY(QRegularExpression(R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$)")
+                    .match(timestamp).hasMatch());
+        const auto recorded = QDateTime::fromString(timestamp, Qt::ISODateWithMs);
+        QVERIFY(recorded >= before && recorded <= after);
+        QCOMPARE(query.value(1).toString(), table);
+        QCOMPARE(query.value(2).toString(), table == "settings" ? QString("api_key") : QString("100"));
+        QCOMPARE(query.value(3).toString(), operation);
+        if (operation == "UPDATE")
+            QCOMPARE(query.value(4).toString(), changedField);
+        else
+            QVERIFY(query.value(4).toString().split(',').contains(changedField));
+    }
+    QVERIFY(!query.next());
+    QVERIFY(query.exec("SELECT * FROM database_operations"));
+    while (query.next()) {
+        for (int column = 0; column < query.record().count(); ++column)
+            QVERIFY(!query.value(column).toString().contains("private"));
+    }
+}
+
+void NexusCoreTests::operationHistoryTracksStatuses()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Statuses");
+    const int task = db.addTask(product, "Task");
+    const int subtask = db.addSubtask(task, "Step");
+    QVERIFY(product > 0 && task > 0 && subtask > 0);
+    QSqlQuery query;
+    QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
+    QVERIFY(db.updateTaskWorkStatus(task, TaskWorkStatus::Ongoing));
+    QVERIFY(db.updateTaskWorkStatus(task, TaskWorkStatus::Completed));
+    QVERIFY(db.updateTaskTitle(task, "After completion"));
+    QVERIFY(db.archiveTask(task));
+    QVERIFY(db.reactivateTask(task));
+    QVERIFY(db.deleteTask(task));
+    QVERIFY(db.restoreTask(task));
+    QVERIFY(db.updateSubtaskWorkStatus(subtask, TaskWorkStatus::Waiting));
+    QVERIFY(query.exec("SELECT table_name, changed_fields, old_status, new_status, "
+                       "old_work_status, new_work_status FROM database_operations ORDER BY id"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(4).toInt(), 0);
+    QCOMPARE(query.value(5).toInt(), 1);
+    QVERIFY(query.value(1).toString().split(',').contains("work_status"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(4).toInt(), 1);
+    QCOMPARE(query.value(5).toInt(), 3);
+    QVERIFY(query.next());
+    QVERIFY(query.value(1).toString().split(',').contains("title"));
+    for (const auto &transition : QList<QStringList>{
+             {"active", "archived"}, {"archived", "active"},
+             {"active", "deleted"}, {"deleted", "active"}}) {
+        QVERIFY(query.next());
+        QCOMPARE(query.value(2).toString(), transition[0]);
+        QCOMPARE(query.value(3).toString(), transition[1]);
+    }
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QString("subtasks"));
+    QCOMPARE(query.value(4).toInt(), 0);
+    QCOMPARE(query.value(5).toInt(), 4);
+    QVERIFY(!query.next());
+}
+
+void NexusCoreTests::operationHistoryTracksOrderingAndMoves()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Ordering");
+    const int first = db.addTask(product, "First");
+    const int second = db.addTask(product, "Second");
+    const int subtask = db.addSubtask(first, "Step");
+    QVERIFY(product > 0 && first > 0 && second > 0 && subtask > 0);
+    QSqlQuery query;
+    QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
+    QVERIFY(db.reorderTasks({second, first}));
+    QVERIFY(db.moveSubtask(subtask, second));
+    QVERIFY(query.exec("SELECT table_name, changed_fields FROM database_operations ORDER BY id"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QString("tasks"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QString("tasks"));
+    QVERIFY(query.value(1).toString().split(',').contains("sort_order"));
+    bool recordedMove = false;
+    while (query.next()) {
+        if (query.value(0).toString() == "subtasks"
+            && query.value(1).toString().split(',').contains("task_id"))
+            recordedMove = true;
+    }
+    QVERIFY(recordedMove);
+}
+
+void NexusCoreTests::operationHistorySurvivesCascadedDeletion()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Cascade");
+    const int task = db.addTask(product, "Task");
+    QVERIFY(db.addSubtask(task, "Step") > 0);
+    db.saveContentSnapshot(task, "Synthetic snapshot");
+    QSqlQuery query;
+    QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
+    QVERIFY(db.deleteProduct(product));
+    QVERIFY(query.exec("SELECT table_name, operation FROM database_operations ORDER BY table_name"));
+    for (const auto &table : QStringList{"products", "subtasks", "task_content_history", "tasks"}) {
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toString(), table);
+        QCOMPARE(query.value(1).toString(), QString("DELETE"));
+    }
+    QVERIFY(!query.next());
+}
+
+void NexusCoreTests::operationHistoryRollsBackWithWrites()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Rollback");
+    const int task = db.addTask(product, "Original");
+    QSqlQuery query;
+    QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
+    QVERIFY(QSqlDatabase::database().transaction());
+    QVERIFY(db.updateTaskTitle(task, "Uncommitted"));
+    QVERIFY(query.exec("SELECT COUNT(*) FROM database_operations"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    query.finish();
+    QVERIFY(QSqlDatabase::database().rollback());
+    QCOMPARE(db.getTask(task).title, QString("Original"));
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression("Failed to add task:.*FOREIGN KEY constraint failed.*"));
+    QCOMPARE(db.addTask(-1, "Invalid parent"), -1);
+    QVERIFY(query.exec("SELECT COUNT(*) FROM database_operations"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 0);
+}
+
+void NexusCoreTests::operationHistoryFailureRejectsWrite()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Failure");
+    const int task = db.addTask(product, "Original");
+    QSqlQuery query;
+    QVERIFY2(query.exec("CREATE TEMP TRIGGER fail_operation_log BEFORE INSERT ON database_operations "
+                        "BEGIN SELECT RAISE(ABORT, 'synthetic log failure'); END"),
+             qPrintable(query.lastError().text()));
+    const bool saved = db.updateTaskTitle(task, "Must not persist");
+    QVERIFY(query.exec("DROP TRIGGER fail_operation_log"));
+    QVERIFY(!saved);
+    QCOMPARE(db.getTask(task).title, QString("Original"));
+}
+
+void NexusCoreTests::operationHistoryDoesNotRecordReads()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Read");
+    const int task = db.addTask(product, "Read");
+    QSqlQuery query;
+    QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
+    db.getAllProducts();
+    db.getTask(task);
+    db.getTasksForProduct(product);
+    db.getSubtasks(task);
+    db.getContentHistory(task);
+    db.getSetting("example");
+    db.searchTasks("Read");
+    QVERIFY(query.exec("SELECT COUNT(*) FROM database_operations"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 0);
+}
+
+void NexusCoreTests::operationHistoryTracksSettingReplacement()
+{
+    auto &db = DatabaseManager::instance();
+    QSqlQuery query;
+    QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
+    QVERIFY(db.setSetting("api_key", "private first"));
+    QVERIFY(db.setSetting("api_key", "private second"));
+    QVERIFY(query.exec("SELECT operation, record_id, changed_fields FROM database_operations ORDER BY id"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QString("INSERT"));
+    QCOMPARE(query.value(1).toString(), QString("api_key"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QString("UPDATE"));
+    QCOMPARE(query.value(1).toString(), QString("api_key"));
+    QCOMPARE(query.value(2).toString(), QString("value"));
+    QVERIFY(!query.next());
+}
+
+void NexusCoreTests::operationHistoryMigratesExistingDatabase()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    auto &db = DatabaseManager::instance();
+    const QString path = directory.filePath("migration.db");
+    QSqlDatabase::database().close();
+    QVERIFY(db.initialize(path));
+    int product = db.addProduct("Existing product");
+    int task = db.addTask(product, "Existing task");
+    {
+        QSqlQuery query;
+        QVERIFY2(query.exec("SELECT name FROM sqlite_master WHERE type = 'trigger' "
+                            "AND tbl_name IN ('products', 'tasks', 'subtasks', "
+                            "'task_content_history', 'settings') AND name LIKE 'audit_%'"),
+                 qPrintable(query.lastError().text()));
+        QStringList triggers;
+        while (query.next()) triggers << query.value(0).toString();
+        query.finish();
+        for (const auto &trigger : triggers)
+            QVERIFY(query.exec("DROP TRIGGER " + trigger));
+        QVERIFY(query.exec("DROP TABLE database_operations"));
+        QVERIFY(db.setSetting("db_version", "9"));
+        QVERIFY(query.exec("CREATE TRIGGER audit_tasks_update AFTER UPDATE ON tasks BEGIN SELECT 1; END"));
+    }
+    QSqlDatabase::database().close();
+    QTest::ignoreMessage(QtCriticalMsg,
+                         QRegularExpression("Failed to enable operation logging:.*"));
+    QTest::ignoreMessage(QtCriticalMsg,
+                         QRegularExpression("Failed to migrate database operation history:.*"));
+    QTest::ignoreMessage(QtCriticalMsg, "Database migration failed.");
+    QVERIFY(!db.initialize(path));
+    QCOMPARE(db.getSetting("db_version"), QString("9"));
+    {
+        QSqlQuery query;
+        QVERIFY(query.exec("SELECT COUNT(*) FROM sqlite_master "
+                           "WHERE name = 'database_operations' OR name LIKE 'audit_%'"));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+        query.finish();
+        QVERIFY(query.exec("DROP TRIGGER audit_tasks_update"));
+    }
+    QSqlDatabase::database().close();
+    QVERIFY(db.initialize(path));
+    QCOMPARE(db.getTask(task).title, QString("Existing task"));
+    QCOMPARE(db.getSetting("db_version"), QString("10"));
+    QVERIFY(db.updateTaskWorkStatus(task, TaskWorkStatus::Completed));
+    {
+        QSqlQuery query;
+        QVERIFY(query.exec("SELECT COUNT(*) FROM database_operations WHERE table_name = 'tasks'"));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+    }
+    QSqlDatabase::database().close();
+    QVERIFY(db.initialize(path));
+    {
+        QSqlQuery query;
+        QVERIFY(db.updateTaskTitle(task, "After restart"));
+        QVERIFY(query.exec("SELECT COUNT(*) FROM database_operations WHERE table_name = 'tasks'"));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 2);
+    }
+    QSqlDatabase::database().close();
+    QVERIFY(db.initialize(":memory:"));
 }
 
 void NexusCoreTests::productLifecycle()

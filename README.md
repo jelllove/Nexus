@@ -12,21 +12,24 @@ A desktop task management application with a 3-pane layout inspired by OneNote, 
 
 Download native packages from the
 [primary releases](https://github.com/jelllove/Nexus/releases).
-An access-controlled mirror is published to
-[qinqiangxu/Nexus](https://github.com/qinqiangxu/Nexus/releases) using the same
-verified commit and assets.
+An access-controlled mirror is maintained separately at
+[qinqiangxu/Nexus](https://github.com/qinqiangxu/Nexus/releases). Mirror
+synchronization copies the same verified commit and assets when requested;
+the mirror can lag behind the primary release.
 The previous `qinqingxu/Nexus` address redirects to this renamed mirror.
 
-### v1.0.12 packages
+### v1.0.13 packages
+
+**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.13/Nexus-Setup-v1.0.13-x64.exe)**
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.12-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.12-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.12-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.12-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.12-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.12-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.12-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.12-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.13-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.13-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.13-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.13-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.13-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.13-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.13-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.13-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -35,9 +38,9 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.12 release notes](docs/release-notes-v1.0.12.md).
-This release fixes the Windows updater's temporary-file lock and opens the
-official download website when a download or package launch fails.
+notes, not personal data. See [v1.0.13 release notes](docs/release-notes-v1.0.13.md).
+This release adds persistent database write history and consent-based AI activity
+summaries by creation/modification time, using your configured AI service.
 Earlier releases and their assets remain unchanged.
 
 ### Linux package-manager installation
@@ -48,9 +51,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.12-Linux-x64.deb
+sudo apt install ./Nexus-1.0.13-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.12-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.13-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -97,6 +100,7 @@ Each new release includes its own version-specific screenshots and evidence.
 - **Global Hotkey** — Control+Shift+N using Win32, macOS Carbon, or Linux X11; native Wayland hotkeys are not supported
 - **GitHub Release Auto-Update** — Checks on startup and every 6 hours (including in the system tray), asks before downloading, supports 1/2/3-month reminder pauses, and shows cancellable download progress
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
+- **AI Activity Summary** — Preview tasks created/modified during a selected period, then explicitly send them to your configured AI for a copyable/saveable Markdown report
 - **Image Support** — Paste or drag images into the editor; stored locally in the platform's application-data directory
 - **Content History** — Automatic snapshots for undo/redo support
 - **Markdown Export** — Export selected Active tasks via Product → Main Task → Sub Task selection, optional AI one-line summaries with extra confirmation, progress dialog with logs/cancel, and a nested pure-Markdown tree output
@@ -252,6 +256,121 @@ The database (`nexus.db`) uses Qt's application-data location by default:
 Custom database paths and existing settings remain supported. See
 [cross-platform design and acceptance criteria](docs/cross-platform.md) for
 platform boundaries, deployment decisions, and verification limitations.
+
+## Database operation history
+
+Starting with v1.0.13, Nexus upgrades existing databases to schema version 10 and
+records subsequent data writes in `database_operations`. Previously recorded
+creation/update timestamps remain unchanged; past operations cannot be
+reconstructed and are not backfilled.
+
+- Every affected row in `products`, `tasks`, `subtasks`, `task_content_history`
+  and `settings` gets its own INSERT/UPDATE/DELETE event, including status changes,
+  ordering, subtask moves, soft deletion, restoration, permanent deletion,
+  snapshot cleanup and cascading deletes. Updates to an existing setting are
+  recorded as UPDATE rather than replacement INSERTs.
+- Persistent SQLite triggers capture writes, including direct SQL on these
+  tables. Events commit or roll back with the data write. Failed or zero-row
+  writes leave no event; an event-write failure prevents the associated write.
+  Schema upgrade failure prevents successful database initialization.
+- Each event stores a sequential ID, UTC time in ISO 8601 format with
+  millisecond precision, table name, record ID (the key for settings), operation,
+  changed column names and previous/current lifecycle and work statuses.
+  Timestamps represent database execution, not each keystroke or the eventual
+  commit time. Multiple events may share a timestamp; use ID for event ordering.
+- Titles, note bodies, snapshot content and setting values (including API
+  keys) are not copied into the log. The log still contains identifiers and
+  status metadata; keep it private with the database.
+- Reading/searching, failed attempts, backups, compaction, schema/PRAGMA
+  operations, internal FTS writes and changes to the log itself are not audited.
+  This is committed row-change history, not an SQL trace or a tamper-proof audit.
+- History survives restarts and deletion of its original records; it has no
+  automatic expiry and grows with writes. It is included in database backups.
+  No history-viewer UI is added; inspect a copy of the database with a SQLite
+  tool rather than editing the live application database.
+
+For example, list recent writes or a task's retained status transitions:
+
+```sql
+SELECT id, occurred_at, table_name, record_id, operation, changed_fields
+FROM database_operations
+ORDER BY id DESC
+LIMIT 100;
+
+SELECT id, occurred_at, old_work_status, new_work_status
+FROM database_operations
+WHERE table_name = 'tasks' AND record_id = '123'
+  AND old_work_status IS NOT new_work_status
+ORDER BY id;
+```
+
+Work statuses are `0` Not Started, `1` Ongoing, `2` Paused, `3` Completed and
+`4` Waiting. Lifecycle statuses are `active`, `archived` and `deleted`.
+The `nexus-core` tests exercise all five tables, timestamp precision, status
+history, ordering/moves, rollback, cascading deletes, secret-value exclusion,
+read exclusion and upgrades/restarts using in-memory or temporary databases.
+
+## AI activity summaries
+
+Starting with v1.0.13, use **File > AI Activity Summary by Time...**.
+
+1. Choose **1 day (today)**, **1 week**, **2 weeks**, **1 month**, **3 months** or
+   **Custom dates**, then choose **Created**, **Modified** or **Created or modified**.
+   The default is one week and either time. Presets include today; week presets
+   cover 7/14 calendar dates, and month presets start one/three calendar months
+   before today plus one day (month ends are clamped). Custom dates include both
+   endpoints. Local day boundaries are converted to UTC, including DST changes;
+   these are calendar-day reports, not rolling 24-hour intervals.
+2. Click **Preview source**. Pending editor changes are saved first; save failures
+   stop preparation. Unchanged editor content is not saved again just for a report.
+   Collection is local and covers all products, including archived products and
+   active, archived and recycled main tasks/subtasks. Each matching item appears
+   once. Unchanged siblings/parents are not added as separate report items.
+3. Review the exact source snapshot, then click **Generate with configured AI...**.
+   A separate confirmation identifies the configured AI host and model; **No** is
+   the default. Nothing is sent merely by opening the dialog or previewing.
+   Configure endpoint/key/model in **Settings** as for existing AI features.
+4. The result opens in a Markdown preview with **Copy Markdown**, **Copy HTML**
+   and **Save As .md**. It includes the selected dates and data limitations.
+   Reports do not overwrite tasks or get automatically stored in the database.
+
+### Data and privacy boundaries
+
+Creation matches the item's creation timestamp. Modification matches its latest
+update timestamp **or any retained UPDATE event in the selected period**, so a
+later edit does not hide a previously recorded change. Ordering, movement and
+metadata edits can count as modifications. Subtasks are matched by their own
+timestamps/events, not by the parent's last edit. Available in-range status
+transitions are sent separately from current status.
+
+Only matched task/subtask titles, plain note text, product/parent names, IDs,
+timestamps, statuses and their in-range event metadata are included. HTML image
+references/attachments, settings values, API credentials and unrelated database
+tables are not included in the source. Your API key is used only for authenticating
+the configured request. Notes can themselves contain private information; review
+them before approving transfer to your chosen provider.
+
+The source is a **current saved-content snapshot**, not the exact historical
+wording at the end of the chosen period. Event history starts with schema v10;
+earlier overwritten update times and permanently deleted notes cannot be
+reconstructed. The prompt distinguishes current status from proven historical
+transitions and forbids inferring completion dates or effort from current values.
+Treat generated reports as drafts to review, not guaranteed factual records.
+
+Changing dates/time basis invalidates the preview. If notes change after preview,
+the already-previewed snapshot is still used; preview again to include those
+changes. Source input is limited to **1000 matched items**, **2000 events** and
+**60000 characters**. Larger inputs are rejected with a shorter-range suggestion,
+not silently truncated. Requests have a 60-second deadline and can be cancelled;
+closing the summary dialog also aborts an in-flight request. Missing configuration,
+no matches, invalid dates, database/network errors and invalid AI responses are
+shown explicitly without a fake successful summary.
+
+`ActivitySummaryTest` runs on local synthetic databases and a loopback fake AI
+server (no real provider). It covers time filtering/boundaries, calendar presets,
+subtasks and archived/deleted scope, retained events, payload privacy, exact input
+limits, confirmation, cancellation, response/error handling and result preview.
+The ordinary Windows validation command includes this suite.
 
 ## Moving subtasks
 
@@ -442,11 +561,11 @@ Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/release-v1.0.12
+git push origin agents/release-v1.0.13
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.12 -m "Nexus v1.0.12"
-git push origin v1.0.12
+git tag -a v1.0.13 -m "Nexus v1.0.13"
+git push origin v1.0.13
 ```
 
 The tag workflow checks editor syntax and bundle reproducibility, runs all nine

@@ -238,6 +238,11 @@ bool EditorPane::saveCurrentContent()
     return true;
 }
 
+bool EditorPane::savePendingContent()
+{
+    return !m_autoSaveTimer->isActive() || saveCurrentContent();
+}
+
 void EditorPane::onAutoSave()
 {
     if (!saveCurrentContent()) {

@@ -217,6 +217,38 @@ private slots:
         list->customContextMenuRequested(list->visualRect(model->index(2)).center());
     }
 
+    void activitySummaryEntryPoint()
+    {
+        auto *action = m_window->findChild<QAction *>("activitySummaryAction");
+        QVERIFY2(action, "Time-based AI summary must be available from the File menu");
+        action->trigger();
+        auto *dialog = m_window->findChild<QDialog *>("activitySummaryDialog");
+        QVERIFY(dialog);
+        QVERIFY(dialog->isVisible());
+        QVERIFY(!dialog->isModal());
+        dialog->close();
+    }
+
+    void summaryFlushesPendingEditsWithoutTouchingUnchangedNotes()
+    {
+        auto &db = DatabaseManager::instance();
+        auto *editor = m_window->findChild<EditorPane *>();
+        editor->loadTask(m_task);
+        QSqlQuery query;
+        QVERIFY(query.exec("SELECT COUNT(*) FROM database_operations"));
+        QVERIFY(query.next());
+        const int before = query.value(0).toInt();
+        query.finish();
+        QVERIFY(editor->savePendingContent());
+        QVERIFY(query.exec("SELECT COUNT(*) FROM database_operations"));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), before);
+        query.finish();
+        editor->findChild<EditorBridge *>()->setContent("<p>Pending summary material</p>");
+        QVERIFY(editor->savePendingContent());
+        QCOMPARE(db.getTask(m_task).content, QString("<p>Pending summary material</p>"));
+    }
+
     void movesUpDownAndKeepsSelection()
     {
         chooseAction(m_second, "Move Up");

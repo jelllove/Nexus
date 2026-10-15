@@ -7,6 +7,7 @@
 #include "db/DatabaseManager.h"
 #include "ui/ExportProgressDialog.h"
 #include "ui/MarkdownPreviewDialog.h"
+#include "ui/ActivitySummaryDialog.h"
 #include <QCloseEvent>
 #include <QMenuBar>
 #include <QMenu>
@@ -155,6 +156,21 @@ void MainWindow::setupMenuBar()
 
     QAction *previewAction = fileMenu->addAction("Preview Selected Tasks as &Markdown...");
     connect(previewAction, &QAction::triggered, this, &MainWindow::previewTasksAsMarkdown);
+
+    auto *summaryAction = fileMenu->addAction("AI Activity Summary by &Time...");
+    summaryAction->setObjectName("activitySummaryAction");
+    connect(summaryAction, &QAction::triggered, this, [this]() {
+        auto *dialog = findChild<ActivitySummaryDialog *>();
+        if (!dialog) {
+            dialog = new ActivitySummaryDialog(this, [this]() {
+                return m_editorPane->savePendingContent();
+            });
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+        }
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    });
 
     fileMenu->addSeparator();
 

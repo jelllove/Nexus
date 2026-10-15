@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Nexus VERSION 1.0.12 LANGUAGES CXX)
+project(Nexus VERSION 1.0.13 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,6 +57,7 @@ set(SOURCES
     src/ui/TaskCardDelegate.cpp
     src/ui/ExportProgressDialog.cpp
     src/ui/MarkdownPreviewDialog.cpp
+    src/ui/ActivitySummaryDialog.cpp
     src/ui/EditorPane.cpp
     src/ui/SearchBar.cpp
     src/ui/SettingsDialog.cpp
@@ -65,6 +66,7 @@ set(SOURCES
     src/services/ImageManager.cpp
     src/services/UpdateService.cpp
     src/services/TaskExportService.cpp
+    src/services/ActivitySummaryService.cpp
     src/platform/InstallerSmoke.cpp
 )
 
@@ -73,6 +75,7 @@ set(HEADERS
     src/db/DatabaseManager.h
     src/models/Product.h
     src/models/Task.h
+    src/models/TaskActivity.h
     src/models/ProductListModel.h
     src/models/TaskListModel.h
     src/ui/ProductPane.h
@@ -81,6 +84,7 @@ set(HEADERS
     src/ui/TaskCardDelegate.h
     src/ui/ExportProgressDialog.h
     src/ui/MarkdownPreviewDialog.h
+    src/ui/ActivitySummaryDialog.h
     src/ui/EditorPane.h
     src/ui/SearchBar.h
     src/ui/SettingsDialog.h
@@ -89,6 +93,7 @@ set(HEADERS
     src/services/ImageManager.h
     src/services/UpdateService.h
     src/services/TaskExportService.h
+    src/services/ActivitySummaryService.h
     src/platform/InstallerSmoke.h
 )
 
@@ -162,6 +167,22 @@ if(BUILD_TESTING)
     add_test(NAME SubtaskMoveTest COMMAND SubtaskMoveTest
         -o "${CMAKE_CURRENT_BINARY_DIR}/SubtaskMoveTest.txt,txt")
     set_tests_properties(SubtaskMoveTest PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
+        TIMEOUT 60)
+    add_executable(ActivitySummaryTest
+        tests/ActivitySummaryTest.cpp
+        src/db/DatabaseManager.cpp
+        src/services/AIService.cpp
+        src/services/ActivitySummaryService.cpp
+        src/services/TaskExportService.cpp
+        src/ui/ActivitySummaryDialog.cpp
+        src/ui/MarkdownPreviewDialog.cpp)
+    target_include_directories(ActivitySummaryTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(ActivitySummaryTest PRIVATE Qt6::Widgets Qt6::Sql Qt6::Network Qt6::Concurrent Qt6::Test)
+    set_target_properties(ActivitySummaryTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
+    add_test(NAME ActivitySummaryTest COMMAND ActivitySummaryTest
+        -o "${CMAKE_CURRENT_BINARY_DIR}/ActivitySummaryTest.txt,txt")
+    set_tests_properties(ActivitySummaryTest PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
         TIMEOUT 60)
 endif()

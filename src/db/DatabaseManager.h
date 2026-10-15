@@ -5,6 +5,7 @@
 #include <QList>
 #include "models/Product.h"
 #include "models/Task.h"
+#include "models/TaskActivity.h"
 
 class DatabaseManager : public QObject
 {
@@ -74,6 +75,8 @@ public:
 
     // Search
     QList<Task> searchTasks(const QString &query, int productId = -1);
+    bool collectTaskActivity(const QDateTime &start, const QDateTime &endExclusive,
+                             ActivityTimeBasis basis, QList<TaskActivity> &items, QString &error);
 
     // Settings
     QString getSetting(const QString &key, const QString &defaultValue = QString());
@@ -98,6 +101,7 @@ private:
     bool createTables();
     bool createFtsTables();
     bool migrateDatabase();
+    bool createOperationLog();
     void updateFtsIndex(int taskId, const QString &title, const QString &content);
     void removeFtsEntry(int taskId);
 
