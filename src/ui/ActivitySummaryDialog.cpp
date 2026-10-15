@@ -52,6 +52,11 @@ ActivitySummaryDialog::ActivitySummaryDialog(QWidget *parent, std::function<bool
     m_basis->addItem("Created", static_cast<int>(ActivityTimeBasis::Created));
     m_basis->addItem("Modified (including recorded changes)", static_cast<int>(ActivityTimeBasis::Modified));
     form->addRow("Select by:", m_basis);
+    m_language = new QComboBox(this);
+    m_language->setObjectName("summaryLanguage");
+    m_language->addItem("English", static_cast<int>(ActivitySummaryLanguage::English));
+    m_language->addItem(QStringLiteral("中文"), static_cast<int>(ActivitySummaryLanguage::Chinese));
+    form->addRow("Summary language:", m_language);
     layout->addLayout(form);
     m_source = new QTextBrowser(this);
     m_source->setObjectName("summarySource");
@@ -84,6 +89,7 @@ ActivitySummaryDialog::ActivitySummaryDialog(QWidget *parent, std::function<bool
     connect(m_start, &QDateEdit::dateChanged, this, &ActivitySummaryDialog::invalidatePreview);
     connect(m_end, &QDateEdit::dateChanged, this, &ActivitySummaryDialog::invalidatePreview);
     connect(m_basis, &QComboBox::currentIndexChanged, this, &ActivitySummaryDialog::invalidatePreview);
+    connect(m_language, &QComboBox::currentIndexChanged, this, &ActivitySummaryDialog::invalidatePreview);
     connect(m_preview, &QPushButton::clicked, this, &ActivitySummaryDialog::buildPreview);
     connect(m_generate, &QPushButton::clicked, this, &ActivitySummaryDialog::generate);
     connect(m_cancel, &QPushButton::clicked, this, &ActivitySummaryDialog::cancelRequest);
@@ -104,6 +110,8 @@ void ActivitySummaryDialog::reject()
 void ActivitySummaryDialog::invalidatePreview()
 {
     m_payload.clear();
+    m_timestampAppendix.clear();
+    m_reportHeader.clear();
     m_source->clear();
     m_generate->setEnabled(false);
     m_status->setText("Options changed. Preview source again before generating.");
@@ -118,18 +126,32 @@ void ActivitySummaryDialog::buildPreview()
     }
     QString error;
     const auto basis = static_cast<ActivityTimeBasis>(m_basis->currentData().toInt());
-    if (!ActivitySummaryService::prepare(m_start->date(), m_end->date(), basis, m_payload, error)) {
+    m_previewLanguage = static_cast<ActivitySummaryLanguage>(m_language->currentData().toInt());
+    if (!ActivitySummaryService::prepare(m_start->date(), m_end->date(), basis, m_payload, error,
+                                        m_previewLanguage, &m_timestampAppendix)) {
         m_status->setText(error);
         return;
     }
     m_source->setPlainText(m_payload);
-    m_reportHeader = QString("# Activity summary\n\n"
+    const bool chinese = m_previewLanguage == ActivitySummaryLanguage::Chinese;
+    const QString selection = !chinese ? m_basis->currentText()
+        : basis == ActivityTimeBasis::Created ? QStringLiteral("创建时间")
+        : basis == ActivityTimeBasis::Modified ? QStringLiteral("修改时间") : QStringLiteral("创建或修改时间");
+    m_reportHeader = (chinese
+        ? QStringLiteral("# 工作总结\n\n"
+                         "- 本地日期范围：%1 至 %2（包含首尾日期）\n"
+                         "- 筛选依据：%3\n"
+                         "- 总结语言：中文\n\n"
+                         "> 基于当前已保存的笔记及期间可用的事件，而非历史正文快照。"
+                         "早期操作历史及永久删除的笔记可能缺失。\n\n")
+        : QString("# Activity summary\n\n"
                             "- Selected local dates: %1 through %2 (inclusive)\n"
-                            "- Selection: %3\n\n"
+                            "- Selection: %3\n"
+                            "- Summary language: English\n\n"
                             "> Based on current saved notes and available in-range events, not historical "
-                            "content snapshots. Earlier history and permanently deleted notes may be missing.\n\n")
+                            "content snapshots. Earlier history and permanently deleted notes may be missing.\n\n"))
                          .arg(m_start->date().toString(Qt::ISODate),
-                              m_end->date().toString(Qt::ISODate), m_basis->currentText());
+                              m_end->date().toString(Qt::ISODate), selection);
     m_generate->setEnabled(true);
     m_status->setText(QString("Local preview ready (%1 characters). This exact snapshot will be sent only after confirmation.")
                           .arg(m_payload.size()));
@@ -152,10 +174,10 @@ void ActivitySummaryDialog::generate()
     const QString host = endpoint.host();
     if (QMessageBox::question(this, "Send activity to AI?",
             QString("Send the previewed task titles, note text, timestamps and statuses to your configured "
-                    "AI service at %1 using model %2?\n\n"
+                    "AI service at %1 using model %2, with output in %3?\n\n"
                     "The material can contain private work information. Settings values and attachments "
                     "are not included. The generated summary will not modify your tasks.")
-                .arg(host, db.getSetting("ai_model", "gpt-4o-mini")),
+                .arg(host, db.getSetting("ai_model", "gpt-4o-mini"), m_language->currentText()),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
         return;
     setBusy(true);
@@ -170,7 +192,7 @@ void ActivitySummaryDialog::generate()
             guard->m_status->setText("Summary generated. Review it before using it; AI can make mistakes.");
             if (!guard->m_result) guard->m_result = new MarkdownPreviewDialog(guard);
             guard->m_result->setWindowTitle("AI Activity Summary - Result");
-            guard->m_result->setMarkdownContent(guard->m_reportHeader + summary);
+            guard->m_result->setMarkdownContent(guard->m_reportHeader + summary + guard->m_timestampAppendix);
             guard->m_result->show();
             guard->m_result->raise();
         },
@@ -180,13 +202,14 @@ void ActivitySummaryDialog::generate()
             guard->setBusy(false);
             guard->m_status->setText(guard->m_cancelled
                 ? "Request cancelled. No summary was generated or saved." : error);
-        });
+        }, m_previewLanguage);
 }
 
 void ActivitySummaryDialog::setBusy(bool busy)
 {
     m_period->setEnabled(!busy);
     m_basis->setEnabled(!busy);
+    m_language->setEnabled(!busy);
     m_start->setEnabled(!busy && m_period->currentIndex() == 5);
     m_end->setEnabled(!busy && m_period->currentIndex() == 5);
     m_preview->setEnabled(!busy);

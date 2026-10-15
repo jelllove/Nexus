@@ -3,6 +3,7 @@
 #include <QDialog>
 #include <QPointer>
 #include <functional>
+#include "services/ActivitySummaryService.h"
 
 class QComboBox;
 class QDateEdit;
@@ -30,6 +31,7 @@ private:
 
     QComboBox *m_period;
     QComboBox *m_basis;
+    QComboBox *m_language;
     QDateEdit *m_start;
     QDateEdit *m_end;
     QLabel *m_status;
@@ -39,6 +41,8 @@ private:
     QPushButton *m_cancel;
     QString m_payload;
     QString m_reportHeader;
+    QString m_timestampAppendix;
+    ActivitySummaryLanguage m_previewLanguage = ActivitySummaryLanguage::English;
     std::function<bool()> m_savePendingEdits;
     QPointer<QNetworkReply> m_request;
     QPointer<MarkdownPreviewDialog> m_result;

@@ -18,18 +18,18 @@ synchronization copies the same verified commit and assets when requested;
 the mirror can lag behind the primary release.
 The previous `qinqingxu/Nexus` address redirects to this renamed mirror.
 
-### v1.0.13 packages
+### v1.0.14 packages
 
-**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.13/Nexus-Setup-v1.0.13-x64.exe)**
+**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.14/Nexus-Setup-v1.0.14-x64.exe)**
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.13-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.13-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.13-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.13-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.13-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.13-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.13-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.13-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.14-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.14-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.14-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.14-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.14-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.14-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.14-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.14-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -38,9 +38,9 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.13 release notes](docs/release-notes-v1.0.13.md).
-This release adds persistent database write history and consent-based AI activity
-summaries by creation/modification time, using your configured AI service.
+notes, not personal data. See [v1.0.14 release notes](docs/release-notes-v1.0.14.md).
+This release adds explicit English/Chinese summary output (English by default)
+and a guaranteed last-update timestamp list for every selected task/subtask.
 Earlier releases and their assets remain unchanged.
 
 ### Linux package-manager installation
@@ -51,9 +51,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.13-Linux-x64.deb
+sudo apt install ./Nexus-1.0.14-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.13-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.14-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -321,6 +321,10 @@ Starting with v1.0.13, use **File > AI Activity Summary by Time...**.
    before today plus one day (month ends are clamped). Custom dates include both
    endpoints. Local day boundaries are converted to UTC, including DST changes;
    these are calendar-day reports, not rolling 24-hour intervals.
+   Starting with v1.0.14, choose **Summary language: English / 中文**.
+   Each newly opened dialog defaults to **English**, regardless of note language.
+   This controls the AI instructions and generated report headings; original
+   task/product names in the timestamp list remain unchanged.
 2. Click **Preview source**. Pending editor changes are saved first; save failures
    stop preparation. Unchanged editor content is not saved again just for a report.
    Collection is local and covers all products, including archived products and
@@ -332,6 +336,13 @@ Starting with v1.0.13, use **File > AI Activity Summary by Time...**.
    Configure endpoint/key/model in **Settings** as for existing AI features.
 4. The result opens in a Markdown preview with **Copy Markdown**, **Copy HTML**
    and **Save As .md**. It includes the selected dates and data limitations.
+   A program-generated **Task timestamps** list includes every selected task
+   and subtask with its saved last-update time, in local ISO 8601 time with
+   UTC offset (or `Z` for UTC). Missing timestamps are explicitly unknown.
+   The AI is also instructed to include timestamps beside the tasks it mentions;
+   the fixed list prevents model omissions from losing the dates.
+   These are the preview snapshot's last-update values, not completion dates or
+   necessarily the last event within the report period, and may fall after it.
    Reports do not overwrite tasks or get automatically stored in the database.
 
 ### Data and privacy boundaries
@@ -357,7 +368,7 @@ reconstructed. The prompt distinguishes current status from proven historical
 transitions and forbids inferring completion dates or effort from current values.
 Treat generated reports as drafts to review, not guaranteed factual records.
 
-Changing dates/time basis invalidates the preview. If notes change after preview,
+Changing dates, time basis or output language invalidates the preview. If notes change after preview,
 the already-previewed snapshot is still used; preview again to include those
 changes. Source input is limited to **1000 matched items**, **2000 events** and
 **60000 characters**. Larger inputs are rejected with a shorter-range suggestion,
@@ -370,6 +381,9 @@ shown explicitly without a fake successful summary.
 server (no real provider). It covers time filtering/boundaries, calendar presets,
 subtasks and archived/deleted scope, retained events, payload privacy, exact input
 limits, confirmation, cancellation, response/error handling and result preview.
+It also verifies both output languages, English defaults, per-item timestamps
+even when the AI omits them, snapshot consistency, unknown timestamps and copying
+the complete report.
 The ordinary Windows validation command includes this suite.
 
 ## Moving subtasks
@@ -561,11 +575,11 @@ Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/release-v1.0.13
+git push origin agents/release-v1.0.14
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.13 -m "Nexus v1.0.13"
-git push origin v1.0.13
+git tag -a v1.0.14 -m "Nexus v1.0.14"
+git push origin v1.0.14
 ```
 
 The tag workflow checks editor syntax and bundle reproducibility, runs all nine

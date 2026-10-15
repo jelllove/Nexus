@@ -4,6 +4,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <functional>
+#include "ActivitySummaryService.h"
 
 class AIService : public QObject
 {
@@ -22,7 +23,8 @@ public:
     QNetworkReply *summarizeActivity(
         const QString &source,
         std::function<void(const QString &)> onSuccess,
-        std::function<void(const QString &)> onFailure);
+        std::function<void(const QString &)> onFailure,
+        ActivitySummaryLanguage language = ActivitySummaryLanguage::English);
     void verifyConnection(const QString &endpoint, const QString &apiKey, const QString &model);
 
 signals:

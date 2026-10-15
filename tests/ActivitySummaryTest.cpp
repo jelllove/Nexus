@@ -15,6 +15,8 @@
 #include <QRegularExpression>
 #include <QTimeZone>
 #include <QTimer>
+#include <QApplication>
+#include <QClipboard>
 #include <memory>
 #include "db/DatabaseManager.h"
 #include "services/ActivitySummaryService.h"
@@ -334,6 +336,109 @@ private slots:
         QVERIFY(!send->isEnabled());
         QVERIFY(dialog.findChild<QTextBrowser *>("summarySource")->toPlainText().isEmpty());
         dialog.close();
+    }
+
+    void languageDefaultsToEnglishAndInvalidatesPreview()
+    {
+        setDates("tasks", m_task, "2026-10-03 12:00:00", "2026-10-03 13:00:00");
+        ActivitySummaryDialog dialog;
+        auto *language = dialog.findChild<QComboBox *>("summaryLanguage");
+        QVERIFY2(language, "Output language selection is required");
+        QCOMPARE(language->count(), 2);
+        QCOMPARE(language->currentText(), QString("English"));
+        prepareDialog(dialog);
+        auto *source = dialog.findChild<QTextBrowser *>("summarySource");
+        auto *send = dialog.findChild<QPushButton *>("summaryGenerate");
+        auto english = QJsonDocument::fromJson(source->toPlainText().toUtf8()).object();
+        QCOMPARE(english["outputLanguage"].toString(), QString("English"));
+        language->setCurrentIndex(1);
+        QVERIFY(!send->isEnabled());
+        QVERIFY(source->toPlainText().isEmpty());
+        dialog.findChild<QPushButton *>("summaryPreview")->click();
+        auto chinese = QJsonDocument::fromJson(source->toPlainText().toUtf8()).object();
+        QCOMPARE(chinese["outputLanguage"].toString(), QString("Simplified Chinese"));
+        QVERIFY(send->isEnabled());
+    }
+
+    void everyTaskTimestampIsIncludedWithoutModelCooperation_data()
+    {
+        QTest::addColumn<bool>("chinese");
+        QTest::newRow("english-default") << false;
+        QTest::newRow("chinese") << true;
+    }
+
+    void everyTaskTimestampIsIncludedWithoutModelCooperation()
+    {
+        QFETCH(bool, chinese);
+        FakeAiServer server;
+        configureAi(server);
+        auto &db = DatabaseManager::instance();
+        const int child = db.addSubtask(m_task, "Child | <b>literal</b>");
+        const int other = db.addTask(m_product, "Created earlier, edited after period");
+        setDates("tasks", m_task, "2026-10-03 12:00:00", "2026-10-03 13:14:15");
+        setDates("subtasks", child, "2026-10-03 12:00:00", "2026-10-04 14:15:16");
+        setDates("tasks", other, "2026-10-03 12:00:00", "2026-10-10 16:17:18");
+        ActivitySummaryDialog dialog;
+        auto *language = dialog.findChild<QComboBox *>("summaryLanguage");
+        QVERIFY(language);
+        if (chinese) language->setCurrentIndex(1);
+        prepareDialog(dialog);
+        // The result must retain the source snapshot, not re-query after the AI request.
+        setDates("tasks", m_task, "2026-10-03 12:00:00", "2026-10-06 18:19:20");
+        answerConsent(QMessageBox::Yes);
+        dialog.findChild<QPushButton *>("summaryGenerate")->click();
+        QVERIFY(!language->isEnabled());
+        QTRY_VERIFY(dialog.findChild<MarkdownPreviewDialog *>());
+        QVERIFY(language->isEnabled());
+        auto *preview = dialog.findChild<MarkdownPreviewDialog *>();
+        const auto text = preview->findChild<QTextBrowser *>()->toPlainText();
+        QVERIFY2(text.contains("Synthetic task"), "Do not rely on AI to include each task's timestamp");
+        QVERIFY(text.contains("Child | <b>literal</b>"));
+        for (const auto &timestamp : {"2026-10-03T13:14:15Z", "2026-10-04T14:15:16Z", "2026-10-10T16:17:18Z"}) {
+            const auto local = QDateTime::fromString(timestamp, Qt::ISODate).toLocalTime();
+            const auto display = local.toOffsetFromUtc(local.offsetFromUtc()).toString(Qt::ISODateWithMs);
+            QVERIFY2(text.contains(display), qPrintable(text));
+        }
+        const QString timestampLabel = chinese ? QStringLiteral("最后更新时间") : QString("Last updated");
+        QVERIFY(text.contains(timestampLabel));
+        QVERIFY(text.contains(chinese ? QStringLiteral("工作总结") : QString("Activity summary")));
+        for (auto *button : preview->findChildren<QPushButton *>()) {
+            if (button->text() == "Copy Markdown") button->click();
+        }
+        const auto markdown = QApplication::clipboard()->text();
+        QVERIFY(markdown.contains(timestampLabel));
+        QVERIFY(markdown.contains("Child"));
+        QVERIFY(markdown.contains("Created earlier, edited after period"));
+        QVERIFY(!markdown.contains("<b>literal</b>"));
+        const auto request = QJsonDocument::fromJson(server.body).object();
+        const auto prompt = request["messages"].toArray()[0].toObject()["content"].toString();
+        QVERIFY(prompt.contains(chinese ? "Simplified Chinese" : "English"));
+        QVERIFY(prompt.contains("lastUpdatedAt"));
+        QVERIFY(!prompt.contains("same language as the task notes"));
+        const auto source = QJsonDocument::fromJson(
+            request["messages"].toArray()[1].toObject()["content"].toString().toUtf8()).object();
+        QCOMPARE(source["outputLanguage"].toString(), chinese ? QString("Simplified Chinese") : QString("English"));
+    }
+
+    void missingTimestampIsExplicitAndFailedPreviewClearsAppendix()
+    {
+        setDates("tasks", m_task, "2026-10-03 12:00:00", "2026-10-03 13:00:00");
+        QSqlQuery query;
+        query.prepare("UPDATE tasks SET updated_at = NULL WHERE id = ?");
+        query.addBindValue(m_task);
+        QVERIFY(query.exec());
+        QString payload, error, appendix;
+        QVERIFY(ActivitySummaryService::prepare(QDate(2026, 10, 1), QDate(2026, 10, 7),
+            ActivityTimeBasis::Created, payload, error, ActivitySummaryLanguage::English, &appendix));
+        QVERIFY(appendix.contains("Synthetic task"));
+        QVERIFY(appendix.contains("Unknown"));
+        QVERIFY(ActivitySummaryService::prepare(QDate(2026, 10, 1), QDate(2026, 10, 7),
+            ActivityTimeBasis::Created, payload, error, ActivitySummaryLanguage::Chinese, &appendix));
+        QVERIFY(appendix.contains(QStringLiteral("未知")));
+        QVERIFY(!ActivitySummaryService::prepare(QDate(2026, 10, 8), QDate(2026, 10, 7),
+            ActivityTimeBasis::Created, payload, error, ActivitySummaryLanguage::Chinese, &appendix));
+        QVERIFY(appendix.isEmpty());
+        QVERIFY(payload.isEmpty());
     }
 
     void configuredAiRequestAndErrors()
