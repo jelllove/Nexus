@@ -107,13 +107,20 @@ void NexusCoreTests::operationHistoryCoversTables()
     QVERIFY(product > 0 && task > 0);
     QSqlQuery query;
     QVERIFY2(query.exec("DELETE FROM database_operations"), qPrintable(query.lastError().text()));
-    const auto before = QDateTime::currentDateTimeUtc();
+    // Use the same clock: SQLite and Qt can quantize sub-millisecond time differently.
+    QVERIFY(query.exec("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"));
+    QVERIFY(query.next());
+    const auto before = QDateTime::fromString(query.value(0).toString(), Qt::ISODateWithMs);
+    query.finish();
     insert.replace("%1", QString::number(product));
     insert.replace("%2", QString::number(task));
     QVERIFY2(query.exec(insert), qPrintable(query.lastError().text()));
     QVERIFY2(query.exec(update), qPrintable(query.lastError().text()));
     QVERIFY2(query.exec(remove), qPrintable(query.lastError().text()));
-    const auto after = QDateTime::currentDateTimeUtc();
+    QVERIFY(query.exec("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"));
+    QVERIFY(query.next());
+    const auto after = QDateTime::fromString(query.value(0).toString(), Qt::ISODateWithMs);
+    query.finish();
     QVERIFY2(query.exec("SELECT occurred_at, table_name, record_id, operation, changed_fields "
                         "FROM database_operations ORDER BY id"), qPrintable(query.lastError().text()));
     for (const auto &operation : QStringList{"INSERT", "UPDATE", "DELETE"}) {
@@ -122,7 +129,10 @@ void NexusCoreTests::operationHistoryCoversTables()
         QVERIFY(QRegularExpression(R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$)")
                     .match(timestamp).hasMatch());
         const auto recorded = QDateTime::fromString(timestamp, Qt::ISODateWithMs);
-        QVERIFY(recorded >= before && recorded <= after);
+        QVERIFY2(recorded >= before && recorded <= after,
+                 qPrintable(QString("Recorded %1 outside SQLite clock bounds [%2, %3]")
+                                .arg(timestamp, before.toString(Qt::ISODateWithMs),
+                                     after.toString(Qt::ISODateWithMs))));
         QCOMPARE(query.value(1).toString(), table);
         QCOMPARE(query.value(2).toString(), table == "settings" ? QString("api_key") : QString("100"));
         QCOMPARE(query.value(3).toString(), operation);
