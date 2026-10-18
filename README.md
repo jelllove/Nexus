@@ -18,18 +18,18 @@ synchronization copies the same verified commit and assets when requested;
 the mirror can lag behind the primary release.
 The previous `qinqingxu/Nexus` address redirects to this renamed mirror.
 
-### v1.0.14 packages
+### v1.0.15 packages
 
-**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.14/Nexus-Setup-v1.0.14-x64.exe)**
+**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.15/Nexus-Setup-v1.0.15-x64.exe)**
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.14-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.14-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.14-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.14-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.14-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.14-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.14-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.14-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.15-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.15-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.15-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.15-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.15-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.15-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.15-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.15-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -38,9 +38,9 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.14 release notes](docs/release-notes-v1.0.14.md).
-This release adds explicit English/Chinese summary output (English by default)
-and a guaranteed last-update timestamp list for every selected task/subtask.
+notes, not personal data. See [v1.0.15 release notes](docs/release-notes-v1.0.15.md).
+This release adds hyperlink destination previews in the bottom status bar and
+an Insert/Edit Link dialog in the editor ribbon with Ctrl/Command+K.
 Earlier releases and their assets remain unchanged.
 
 ### Linux package-manager installation
@@ -51,9 +51,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.14-Linux-x64.deb
+sudo apt install ./Nexus-1.0.15-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.14-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.15-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -88,6 +88,8 @@ Each new release includes its own version-specific screenshots and evidence.
 
 - **3-Pane Layout** — Products (notebooks) → Tasks (pages) → Rich Editor, with a resizable splitter
 - **Rich Text Editor** — TipTap-based WYSIWYG editor embedded via QWebEngineView, supporting headings, lists, code blocks, images, and more
+- **Link Preview** — Hover over a hyperlink in the content editor to see its destination URL in the bottom status bar; the preview clears when the pointer leaves or you switch notes
+- **Insert and Edit Links** — Use **Insert > Link** in the editor ribbon or **Ctrl+K** (**Command+K** on macOS) to insert a link at the cursor, link selected text, edit its address/display text, or remove it
 - **Task Cards** — Visual task cards with priority badges (P0–P3), color-coded priority bars, created/modified timestamps, and due-date progress bars with cute animal icons
 - **Sub Task Work Status** — Sub tasks support the same 5 statuses as main tasks (Not Started/Ongoing/Paused/Completed/Waiting), rendered as smaller status icons with click-to-change popups
 - **Sub Task Movement** — Drag subtasks to reorder or move between visible main tasks, with drop indicators and edge scrolling; a right-click menu also offers up/down actions and a searchable destination picker
@@ -575,14 +577,14 @@ Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/release-v1.0.14
+git push origin agents/release-v1.0.15
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.14 -m "Nexus v1.0.14"
-git push origin v1.0.14
+git tag -a v1.0.15 -m "Nexus v1.0.15"
+git push origin v1.0.15
 ```
 
-The tag workflow checks editor syntax and bundle reproducibility, runs all nine
+The tag workflow checks editor syntax and bundle reproducibility, runs all ten
 CTest suites on each platform, builds all three platforms, verifies installed macOS/Linux
 packages and screenshots, requires all four DEB/RPM lifecycle jobs, creates the Windows Inno Setup installer from the
 deployed runtime, and publishes a GitHub release only after these gates pass.
@@ -631,6 +633,11 @@ desktop, a temporary database and fake update requests, not personal data.
 The Windows helper supplies Qt DLLs on the test process PATH; for manual CTest,
 add the Qt `bin` directory to PATH first. Set `-DBUILD_TESTING=OFF`
 when configuring a packaging-only build that does not need Qt Test.
+
+The UI suite exercises the rendered editor, including mouse hover through
+Chromium and hyperlink insert/edit/remove, cancellation and saving. CTest uses
+software rendering (`QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`) for this offscreen
+suite so it does not depend on a working hardware GPU context.
 
 The regression suite covers product/task lifecycle, due-date ordering, subtasks,
 search index updates, settings, model roles and reorder transaction failures.

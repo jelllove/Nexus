@@ -142,6 +142,17 @@ void MainWindow::setupUi()
             this, &MainWindow::onTaskTitleChanged);
     connect(m_editorPane, &EditorPane::autoGenerateTitleRequested,
             this, &MainWindow::onGenerateTitleRequested);
+    connect(m_editorPane, &EditorPane::linkHovered, this, [this](const QString &url) {
+        if (url.isEmpty()) {
+            // A newer operation may have replaced the link preview.
+            if (!m_hoveredLink.isEmpty() && statusBar()->currentMessage() == m_hoveredLink) {
+                statusBar()->clearMessage();
+            }
+        } else {
+            statusBar()->showMessage(url);
+        }
+        m_hoveredLink = url;
+    });
 }
 
 void MainWindow::setupMenuBar()

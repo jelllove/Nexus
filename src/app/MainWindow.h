@@ -102,6 +102,7 @@ private:
     QSystemTrayIcon *m_trayIcon;
 
     // State
+    QString m_hoveredLink;
     int m_currentTaskIdForTitle = -1;
     int m_currentTaskIdForSummary = -1;
     bool m_searchActive = false;

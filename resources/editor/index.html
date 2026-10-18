@@ -134,6 +134,16 @@
         <div id="tab-insert" class="ribbon-panel">
             <div class="ribbon-group">
                 <div class="ribbon-group-buttons">
+                    <button id="btn-link" class="ribbon-btn ribbon-btn-lg" onclick="showLinkDialog()" title="Insert or Edit Link (Ctrl+K)">
+                        <span class="ribbon-icon">&#128279;</span>
+                        <span class="ribbon-label">Link</span>
+                    </button>
+                </div>
+                <span class="ribbon-group-label">Links</span>
+            </div>
+            <div class="ribbon-divider"></div>
+            <div class="ribbon-group">
+                <div class="ribbon-group-buttons">
                     <button class="ribbon-btn ribbon-btn-lg" onclick="requestInsertImage()" title="Insert Picture">
                         <span class="ribbon-icon">&#128247;</span>
                         <span class="ribbon-label">Picture</span>
@@ -232,6 +242,21 @@
         <div id="editor"></div>
     </div>
 
+    <dialog id="link-dialog" aria-labelledby="link-dialog-title">
+        <form id="link-form">
+            <h2 id="link-dialog-title">Insert Link</h2>
+            <label for="link-text">Text to display</label>
+            <input id="link-text" type="text" autocomplete="off">
+            <label for="link-url">Address</label>
+            <input id="link-url" type="text" placeholder="https://example.com" required autocomplete="off" aria-describedby="link-error">
+            <p id="link-error" role="alert"></p>
+            <div class="link-dialog-actions">
+                <button id="link-remove" type="button">Remove Link</button>
+                <button id="link-cancel" type="button">Cancel</button>
+                <button id="link-save" type="submit">Insert</button>
+            </div>
+        </form>
+    </dialog>
     <script src="qrc:/editor/editor.js"></script>
 </body>
 </html>

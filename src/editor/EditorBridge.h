@@ -29,12 +29,14 @@ public slots:
 
     // Called from JavaScript to open a URL in external browser
     void openExternalUrl(const QString &url);
+    void setHoveredLink(const QString &url);
 
     // Called from JavaScript to request AI operations
     void requestGenerateTitle();
     void requestSummarize();
 
 signals:
+    void linkHovered(const QString &url);
     void contentChanged(const QString &content);
     void editorReady();
     void loadContentRequested(const QString &content);

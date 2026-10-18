@@ -48,9 +48,14 @@ void EditorPane::setupUi()
     // Use custom page to intercept link clicks
     auto *page = new EditorWebPage(m_webView);
     m_webView->setPage(page);
+    connect(page, &QWebEnginePage::loadStarted, this, [this]() {
+        emit linkHovered(QString());
+    });
 
     m_channel = new QWebChannel(this);
     m_bridge = new EditorBridge(this);
+    // Editable anchors do not reliably produce WebEngine's native linkHovered.
+    connect(m_bridge, &EditorBridge::linkHovered, this, &EditorPane::linkHovered);
 
     m_channel->registerObject("bridge", m_bridge);
     m_webView->page()->setWebChannel(m_channel);
@@ -81,6 +86,8 @@ void EditorPane::setupUi()
 
 void EditorPane::loadTask(int taskId)
 {
+    emit linkHovered(QString());
+
     // Save current task before switching
     if ((m_currentTaskId > 0 || m_currentSubTaskId > 0) && m_autoSaveTimer->isActive()) {
         onAutoSave();
@@ -124,6 +131,8 @@ void EditorPane::loadTask(int taskId)
 
 void EditorPane::loadSubTask(int subTaskId)
 {
+    emit linkHovered(QString());
+
     // Save current entry before switching
     if ((m_currentTaskId > 0 || m_currentSubTaskId > 0) && m_autoSaveTimer->isActive()) {
         onAutoSave();
@@ -166,6 +175,7 @@ void EditorPane::loadSubTask(int subTaskId)
 
 void EditorPane::clear()
 {
+    emit linkHovered(QString());
     m_currentTaskId = -1;
     m_currentSubTaskId = -1;
     m_currentContent.clear();

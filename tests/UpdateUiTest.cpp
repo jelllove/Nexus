@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEventLoop>
 #include <QLabel>
 #include <QLocale>
 #include <QMessageBox>
@@ -21,6 +22,7 @@
 #include <QSignalSpy>
 #include <QSqlQuery>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QtTest>
@@ -61,6 +63,29 @@ class UpdateUiTest : public QObject
     Qt::TextInteractionFlags m_lastMessageFlags;
     int m_taskId = -1;
     int m_subtaskId = -1;
+
+    QVariant editorScript(const QString &script)
+    {
+        auto *view = m_window->findChild<QWebEngineView *>();
+        QEventLoop loop;
+        QVariant result;
+        auto alive = std::make_shared<bool>(true);
+        QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+        view->page()->runJavaScript(script, [&, alive](const QVariant &value) {
+            if (!*alive) return;
+            result = value;
+            loop.quit();
+        });
+        loop.exec();
+        *alive = false;
+        return result;
+    }
+
+    void showRenderedEditor()
+    {
+        m_window->show();
+        QTRY_VERIFY_WITH_TIMEOUT(editorScript("typeof editor !== 'undefined' && !!editor && !!document.querySelector('.ProseMirror')").toBool(), 10000);
+    }
 
     QString updateButtonText() const
     {
@@ -228,6 +253,179 @@ private slots:
         }
         m_downloads.clear();
         QCOMPARE(m_expectedMessageAnswers, 0);
+    }
+
+    void editorLinkHoverShowsDestinationAndClears_data()
+    {
+        QTest::addColumn<QString>("url");
+        QTest::newRow("https") << QString("https://example.com/docs?q=hello%20world#section");
+        QTest::newRow("email") << QString("mailto:hello@example.com");
+        QTest::newRow("long-url") << (QString("https://example.com/") + QString(500, 'a'));
+    }
+
+    void editableLinkHoverReachesStatusBar()
+    {
+        showRenderedEditor();
+        QVERIFY(editorScript(
+            "editor.commands.setContent('<p><a href=\"https://example.com/hover\"><strong>Hover destination</strong></a> plain text</p>'); "
+            "const target = document.querySelector('.ProseMirror a strong'); "
+            "target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); "
+            "true; ").toBool());
+        QTRY_COMPARE(m_window->statusBar()->currentMessage(), QString("https://example.com/hover"));
+        editorScript("document.querySelector('.ProseMirror a strong').dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.querySelector('#ribbon') }));");
+        QTRY_VERIFY(m_window->statusBar()->currentMessage().isEmpty());
+    }
+
+    void hyperlinkDialogInsertsEditsAndRemovesLinks()
+    {
+        showRenderedEditor();
+        QVERIFY(editorScript(
+            "editor.commands.setContent('<p>Selected words</p>'); "
+            "editor.commands.setTextSelection({ from: 1, to: 15 }); "
+            "document.querySelector('[onclick=\"switchTab(\\'insert\\')\"]').click(); "
+            "const button = document.getElementById('btn-link'); "
+            "if (button) button.click(); "
+            "!!button && document.getElementById('link-dialog').open; ").toBool());
+        QCOMPARE(editorScript("document.getElementById('link-text').value").toString(), QString("Selected words"));
+        QVERIFY(editorScript(
+            "document.getElementById('link-url').value = 'https://example.com/first'; "
+            "document.getElementById('link-form').requestSubmit(); "
+            "document.querySelector('.ProseMirror a').getAttribute('href') === 'https://example.com/first'; ").toBool());
+        QVERIFY(editorScript(
+            "editor.commands.setTextSelection(3); "
+            "document.getElementById('btn-link').click(); "
+            "document.getElementById('link-url').value === 'https://example.com/first' && "
+            "document.getElementById('link-text').value === 'Selected words'; ").toBool());
+        QVERIFY(editorScript(
+            "document.getElementById('link-url').value = 'https://example.com/edited'; "
+            "document.getElementById('link-text').value = 'Edited label'; "
+            "document.getElementById('link-form').requestSubmit(); "
+            "document.querySelector('.ProseMirror a').textContent === 'Edited label' && "
+            "document.querySelector('.ProseMirror a').getAttribute('href') === 'https://example.com/edited'; ").toBool());
+        QVERIFY(editorScript(
+            "editor.commands.setTextSelection(3); "
+            "document.getElementById('btn-link').click(); "
+            "document.getElementById('link-remove').click(); "
+            "!document.querySelector('.ProseMirror a') && editor.getText() === 'Edited label'; ").toBool());
+    }
+
+    void hyperlinkShortcutCancelValidationAndPersistence()
+    {
+        showRenderedEditor();
+        auto *pane = m_window->findChild<EditorPane *>();
+        pane->loadTask(m_taskId);
+        QTRY_VERIFY(editorScript("document.getElementById('page-title').textContent === 'Test task'").toBool());
+        QVERIFY(editorScript(
+            "editor.commands.setContent('<p><strong>Selected words</strong></p>');"
+            "editor.commands.setTextSelection({ from: 1, to: 15 });"
+            "document.querySelector('.ProseMirror').dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));"
+            "document.getElementById('link-dialog').open;").toBool());
+        QVERIFY(editorScript(
+            "document.getElementById('link-url').value = 'https://example.com/cancel';"
+            "document.getElementById('link-cancel').click();"
+            "!document.getElementById('link-dialog').open && !document.querySelector('.ProseMirror a') && editor.state.selection.from === 1 && editor.state.selection.to === 15;").toBool());
+        QVERIFY(editorScript(
+            "showLinkDialog();"
+            "document.getElementById('link-url').value = 'javascript:alert(1)';"
+            "document.getElementById('link-form').requestSubmit();"
+            "document.getElementById('link-dialog').open && !!document.getElementById('link-error').textContent && !document.querySelector('.ProseMirror a');").toBool());
+        QVERIFY(editorScript(
+            "document.getElementById('link-url').value = 'https://example.com/saved';"
+            "document.getElementById('link-form').requestSubmit();"
+            "!!document.querySelector('.ProseMirror strong a, .ProseMirror a strong');").toBool());
+        auto *bridge = pane->findChild<EditorBridge *>();
+        QTRY_VERIFY(bridge->content().contains("https://example.com/saved"));
+        QVERIFY(pane->saveCurrentContent());
+        QVERIFY(DatabaseManager::instance().getTask(m_taskId).content.contains("https://example.com/saved"));
+        QVERIFY(editorScript(
+            "editor.commands.setContent('<p></p>');"
+            "editor.commands.setTextSelection(1); showLinkDialog();"
+            "document.getElementById('link-url').value = 'mailto:hello@example.com';"
+            "document.getElementById('link-text').value = '<Contact>';"
+            "document.getElementById('link-form').requestSubmit();"
+            "document.querySelector('.ProseMirror a').textContent === '<Contact>' && document.querySelector('.ProseMirror a').getAttribute('href') === 'mailto:hello@example.com';").toBool());
+        QVERIFY(editorScript(
+            "editor.commands.setTextSelection(3); showLinkDialog();"
+            "document.getElementById('link-dialog').dispatchEvent(new Event('cancel', { cancelable: true }));"
+            "!document.getElementById('link-dialog').open;").toBool());
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
+    }
+
+    void editableLinkRealMouseHover()
+    {
+        showRenderedEditor();
+        editorScript("editor.commands.setContent('<p><a href=\"https://example.com/mouse\">Hover here</a></p>');");
+        const QVariantList location = editorScript(
+            "(() => { const r = document.querySelector('.ProseMirror a').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()").toList();
+        QCOMPARE(location.size(), 2);
+        auto *view = m_window->findChild<QWebEngineView *>();
+        QVERIFY(view->focusProxy());
+        QTest::mouseMove(view->focusProxy(), QPoint(location[0].toInt(), location[1].toInt()));
+        QTRY_COMPARE(m_window->statusBar()->currentMessage(), QString("https://example.com/mouse"));
+        QTest::mouseMove(view->focusProxy(), QPoint(5, 5));
+        QTRY_VERIFY(m_window->statusBar()->currentMessage().isEmpty());
+    }
+
+    void editorLinkHoverShowsDestinationAndClears()
+    {
+        QFETCH(QString, url);
+        auto *view = m_window->findChild<QWebEngineView *>();
+        QVERIFY(view);
+        auto *bar = m_window->statusBar();
+
+        // Exercise the bridge boundary in addition to the rendered DOM tests.
+        auto *bridge = m_window->findChild<EditorBridge *>();
+        QVERIFY(bridge);
+        bridge->setHoveredLink(url);
+        QCOMPARE(bar->currentMessage(), url);
+        const QString nextUrl = "https://example.org/next";
+        bridge->setHoveredLink(nextUrl);
+        QCOMPARE(bar->currentMessage(), nextUrl);
+        bridge->setHoveredLink(QString());
+        QVERIFY(bar->currentMessage().isEmpty());
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
+    }
+
+    void editorLinkLeavePreservesOtherStatusMessages()
+    {
+        auto *view = m_window->findChild<QWebEngineView *>();
+        QVERIFY(view);
+        auto *bar = m_window->statusBar();
+        const QString status = "Downloading update...";
+        auto *bridge = m_window->findChild<EditorBridge *>();
+        QVERIFY(bridge);
+        bar->showMessage(status);
+        bridge->setHoveredLink(QString());
+        QCOMPARE(bar->currentMessage(), status);
+
+        bridge->setHoveredLink("https://example.com");
+        bar->showMessage(status);
+        bridge->setHoveredLink(QString());
+        QCOMPARE(bar->currentMessage(), status);
+    }
+
+    void editorLinkPreviewClearsWhenChangingNotes()
+    {
+        auto *editor = m_window->findChild<EditorPane *>();
+        QVERIFY(editor);
+        auto *view = editor->findChild<QWebEngineView *>();
+        QVERIFY(view);
+        auto *bar = m_window->statusBar();
+        auto *bridge = editor->findChild<EditorBridge *>();
+        QVERIFY(bridge);
+
+        bridge->setHoveredLink("https://example.com/task");
+        editor->loadTask(m_taskId);
+        QVERIFY(bar->currentMessage().isEmpty());
+        bridge->setHoveredLink("https://example.com/subtask");
+        editor->loadSubTask(m_subtaskId);
+        QVERIFY(bar->currentMessage().isEmpty());
+        bridge->setHoveredLink("https://example.com/clear");
+        editor->clear();
+        QVERIFY(bar->currentMessage().isEmpty());
+        bridge->setHoveredLink("https://example.com/reload");
+        emit view->page()->loadStarted();
+        QVERIFY(bar->currentMessage().isEmpty());
     }
 
     void deferringNeverDownloadsAndPersistsDeadline_data()

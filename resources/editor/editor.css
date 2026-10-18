@@ -16,6 +16,27 @@ body {
     overflow-y: auto;
 }
 
+/* Hyperlink editor: native modal dialog keeps the ribbon compact. */
+#link-dialog {
+    margin: auto;
+    width: min(440px, calc(100vw - 32px));
+    padding: 24px;
+    border: 1px solid #c0c0c0;
+    border-radius: 8px;
+    box-shadow: 0 12px 40px #0003;
+    color: #1a1a1a;
+}
+#link-dialog::backdrop { background: #0005; }
+#link-form { display: flex; flex-direction: column; gap: 10px; }
+#link-form h2 { font-size: 18px; margin-bottom: 6px; }
+#link-form label { font-size: 13px; font-weight: 600; }
+#link-form input { width: 100%; padding: 8px; border: 1px solid #999; border-radius: 4px; font: inherit; }
+#link-error { color: #b3261e; font-size: 12px; min-height: 16px; }
+.link-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.link-dialog-actions button { padding: 7px 12px; border: 1px solid #bbb; border-radius: 4px; cursor: pointer; }
+#link-save { background: #7b5ea7; color: white; border-color: #7b5ea7; }
+#link-remove { margin-right: auto; }
+
 /* ============================================================
    Ribbon Toolbar
    ============================================================ */

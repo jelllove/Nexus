@@ -25,6 +25,7 @@ public:
     void resetTitleGenerationPending() { m_titleGenerationPending = false; }
 
 signals:
+    void linkHovered(const QString &url);
     void contentChanged(int taskId, const QString &content);
     void titleChanged(int taskId, const QString &title);
     void generateTitleRequested(int taskId, const QString &content);

@@ -36,6 +36,11 @@ void EditorBridge::openExternalUrl(const QString &url)
     QDesktopServices::openUrl(QUrl(url));
 }
 
+void EditorBridge::setHoveredLink(const QString &url)
+{
+    emit linkHovered(url);
+}
+
 void EditorBridge::requestGenerateTitle()
 {
     emit generateTitleRequested();

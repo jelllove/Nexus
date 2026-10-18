@@ -7,6 +7,9 @@ let editor = null;
 let bridge = null;
 let isLoadingContent = false;
 let currentZoom = 100;
+let hoveredLink = '';
+let linkSelection = null;
+let fallbackEditor = false;
 
 // ---- QWebChannel Bridge ----
 
@@ -15,6 +18,8 @@ function initBridge() {
         bridge = channel.objects.bridge;
 
         bridge.loadContentRequested.connect(function(content) {
+            closeLinkDialog(false);
+            reportHoveredLink('');
             if (editor) {
                 isLoadingContent = true;
                 editor.commands.setContent(content || '<p></p>');
@@ -23,6 +28,7 @@ function initBridge() {
         });
 
         initEditor();
+        initLinkControls();
         bridge.onEditorReady();
     });
 }
@@ -54,7 +60,8 @@ function initEditor() {
         return;
     }
 
-    const extensions = [StarterKit];
+    // These extensions are configured separately below.
+    const extensions = [StarterKit.configure({ link: false, underline: false })];
 
     if (TextStyle) extensions.push(TextStyle);
     if (Color) extensions.push(Color);
@@ -140,6 +147,7 @@ function initEditor() {
 // ---- Fallback Editor ----
 
 function initFallbackEditor() {
+    fallbackEditor = true;
     const editorEl = document.querySelector('#editor');
     editorEl.setAttribute('contenteditable', 'true');
     editorEl.innerHTML = '<p></p>';
@@ -189,6 +197,163 @@ function initFallbackEditor() {
             }
         }, 300);
     });
+}
+
+// Editable links need DOM hover events: Chromium's native linkHovered is not
+// emitted consistently for anchors inside contenteditable.
+function reportHoveredLink(url) {
+    if (url === hoveredLink) return;
+    hoveredLink = url;
+    if (bridge) bridge.setHoveredLink(url);
+}
+
+function initLinkControls() {
+    const root = document.getElementById('editor');
+    const linkAt = target => target instanceof Element ? target.closest('a[href]') : null;
+    const updateHover = event => {
+        const link = linkAt(event.target);
+        reportHoveredLink(link && root.contains(link) ? link.href : '');
+    };
+    root.addEventListener('mouseover', updateHover);
+    root.addEventListener('mousemove', updateHover);
+    root.addEventListener('mouseout', event => {
+        const link = linkAt(event.relatedTarget);
+        reportHoveredLink(link && root.contains(link) ? link.href : '');
+    });
+    root.addEventListener('mouseleave', () => reportHoveredLink(''));
+    window.addEventListener('blur', () => reportHoveredLink(''));
+    root.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+            event.preventDefault();
+            showLinkDialog();
+        }
+    });
+    // Keep a fallback contenteditable selection when the ribbon takes focus.
+    document.getElementById('btn-link').addEventListener('mousedown', event => event.preventDefault());
+    document.getElementById('link-form').addEventListener('submit', saveLink);
+    document.getElementById('link-cancel').addEventListener('click', () => closeLinkDialog());
+    document.getElementById('link-remove').addEventListener('click', removeLink);
+    document.getElementById('link-dialog').addEventListener('cancel', event => {
+        event.preventDefault();
+        closeLinkDialog();
+    });
+}
+
+function showLinkDialog() {
+    if (!editor || document.getElementById('link-dialog').open) return;
+    let href = '';
+    let text = '';
+    if (!fallbackEditor) {
+        if (editor.isActive('link')) editor.chain().extendMarkRange('link').run();
+        const { from, to } = editor.state.selection;
+        href = editor.getAttributes('link').href || '';
+        text = editor.state.doc.textBetween(from, to, ' ');
+        linkSelection = { from, to, text };
+    } else {
+        const selection = window.getSelection();
+        const root = document.getElementById('editor');
+        let range = selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+        if (!range || !root.contains(range.commonAncestorContainer)) {
+            range = document.createRange();
+            range.selectNodeContents(root);
+            range.collapse(false);
+        }
+        const node = range.startContainer;
+        const link = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement).closest('a');
+        if (link && root.contains(link)) {
+            href = link.getAttribute('href') || '';
+            range.selectNodeContents(link);
+        }
+        text = range.toString();
+        linkSelection = { range, link, text };
+    }
+    document.getElementById('link-dialog-title').textContent = href ? 'Edit Link' : 'Insert Link';
+    document.getElementById('link-save').textContent = href ? 'Save' : 'Insert';
+    document.getElementById('link-text').value = text;
+    document.getElementById('link-url').value = href;
+    document.getElementById('link-remove').hidden = !href;
+    document.getElementById('link-error').textContent = '';
+    document.getElementById('link-dialog').showModal();
+    document.getElementById('link-url').focus();
+}
+
+function closeLinkDialog(restoreFocus = true) {
+    const dialog = document.getElementById('link-dialog');
+    if (!dialog || !dialog.open) return;
+    dialog.close();
+    if (restoreFocus && linkSelection) {
+        if (!fallbackEditor) editor.chain().focus().setTextSelection(linkSelection).run();
+        else {
+            document.getElementById('editor').focus();
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(linkSelection.range);
+        }
+    }
+    linkSelection = null;
+}
+
+function validatedLinkAddress(value) {
+    let address = value.trim();
+    if (/^www\./i.test(address)) address = 'https://' + address;
+    if (/[\u0000-\u0020\u007f]/.test(address)) return null;
+    try {
+        const url = new URL(address);
+        if (!['http:', 'https:', 'mailto:', 'tel:', 'ftp:', 'ftps:'].includes(url.protocol)) return null;
+        if (['http:', 'https:', 'ftp:', 'ftps:'].includes(url.protocol) && !url.hostname) return null;
+        if (['mailto:', 'tel:'].includes(url.protocol) && !url.pathname) return null;
+        return address;
+    } catch (_) { return null; }
+}
+
+function saveLink(event) {
+    event.preventDefault();
+    if (!linkSelection) return;
+    const href = validatedLinkAddress(document.getElementById('link-url').value);
+    if (!href) {
+        document.getElementById('link-error').textContent = 'Enter a valid web, email, phone or FTP address.';
+        return;
+    }
+    const text = document.getElementById('link-text').value || href;
+    const saved = linkSelection;
+    closeLinkDialog(false);
+    if (!fallbackEditor) {
+        const chain = editor.chain().focus().setTextSelection(saved);
+        if (saved.text === text && saved.from !== saved.to) {
+            chain.setLink({ href }).run();
+        } else {
+            const marks = (editor.state.doc.nodeAt(saved.from)?.marks || [])
+                .filter(mark => mark.type.name !== 'link').map(mark => mark.toJSON());
+            marks.push({ type: 'link', attrs: { href } });
+            chain.insertContentAt({ from: saved.from, to: saved.to }, { type: 'text', text, marks })
+                .command(({ tr }) => { tr.setStoredMarks([]); return true; }).run();
+        }
+    } else {
+        const link = saved.link || document.createElement('a');
+        link.setAttribute('href', href);
+        if (saved.link) {
+            if (saved.text !== text) link.textContent = text;
+        } else {
+            if (saved.text === text && !saved.range.collapsed) link.append(saved.range.extractContents());
+            else { saved.range.deleteContents(); link.textContent = text; }
+            saved.range.insertNode(link);
+        }
+        document.getElementById('editor').dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    reportHoveredLink('');
+}
+
+function removeLink() {
+    if (!linkSelection) return;
+    const saved = linkSelection;
+    closeLinkDialog(false);
+    if (!fallbackEditor) {
+        editor.chain().focus().setTextSelection(saved).unsetLink().run();
+    } else if (saved.link) {
+        saved.link.replaceWith(...saved.link.childNodes);
+        document.getElementById('editor').dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    reportHoveredLink('');
 }
 
 // ---- Ribbon Tab Switching ----

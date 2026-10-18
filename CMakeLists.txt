@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Nexus VERSION 1.0.14 LANGUAGES CXX)
+project(Nexus VERSION 1.0.15 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -156,7 +156,7 @@ if(BUILD_TESTING)
     add_test(NAME UpdateUiTest COMMAND UpdateUiTest
         -o "${CMAKE_CURRENT_BINARY_DIR}/UpdateUiTest.txt,txt")
     set_tests_properties(UpdateUiTest PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu"
         TIMEOUT 60)
     add_executable(SubtaskMoveTest tests/SubtaskMoveTest.cpp ${UPDATE_UI_TEST_SOURCES} ${HEADERS} ${RESOURCES})
     target_include_directories(SubtaskMoveTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
