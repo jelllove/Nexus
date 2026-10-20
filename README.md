@@ -18,18 +18,18 @@ synchronization copies the same verified commit and assets when requested;
 the mirror can lag behind the primary release.
 The previous `qinqingxu/Nexus` address redirects to this renamed mirror.
 
-### v1.0.15 packages
+### v1.0.16 packages
 
-**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.15/Nexus-Setup-v1.0.15-x64.exe)**
+**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.16/Nexus-Setup-v1.0.16-x64.exe)**
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.15-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.15-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.15-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.15-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.15-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.15-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.15-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.15-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.16-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.16-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.16-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.16-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.16-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.16-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.16-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.16-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -38,9 +38,9 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.15 release notes](docs/release-notes-v1.0.15.md).
-This release adds hyperlink destination previews in the bottom status bar and
-an Insert/Edit Link dialog in the editor ribbon with Ctrl/Command+K.
+notes, not personal data. See [v1.0.16 release notes](docs/release-notes-v1.0.16.md).
+This release adds **Show completed** in the Tasks pane, with remembered
+visibility, safe note saving and filtering across products and search results.
 Earlier releases and their assets remain unchanged.
 
 ### Linux package-manager installation
@@ -51,9 +51,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.15-Linux-x64.deb
+sudo apt install ./Nexus-1.0.16-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.15-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.16-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -97,6 +97,7 @@ Each new release includes its own version-specific screenshots and evidence.
 - **Full-Text Search** — SQLite FTS5-powered global search across Active/Archived/Deleted task titles and content, rendered directly in the task list with context restore on clear
 - **Priority Management** — Click the priority badge or right-click to change task priority; tasks auto-sort by priority then due date
 - **Active / Archived Toggle** — Quick-switch between active and archived tasks with toggle buttons
+- **Show Completed** — Hide or show completed main tasks and subtasks with one checkbox; the preference is remembered across products, views and restarts
 - **Product Ordering & Archive** — Drag to reorder products, archive/reactivate products, and expand archived products below the active list
 - **System Tray** — Minimize to tray when available; otherwise save and exit on close
 - **Global Hotkey** — Control+Shift+N using Win32, macOS Carbon, or Linux X11; native Wayland hotkeys are not supported
@@ -108,6 +109,22 @@ Each new release includes its own version-specific screenshots and evidence.
 - **Markdown Export** — Export selected Active tasks via Product → Main Task → Sub Task selection, optional AI one-line summaries with extra confirmation, progress dialog with logs/cancel, and a nested pure-Markdown tree output
 - **Markdown Preview** — Reuse the same selection/summarization pipeline and open a non-modal preview window with `Copy Markdown`, `Copy HTML`, and `Save As .md`
 - **Database Maintenance** — Daily `VACUUM INTO` backups and delayed weekly background compaction (`wal_checkpoint(TRUNCATE)` + `VACUUM`)
+
+## Task list filtering
+
+Use **Show completed** below the Active / Archived / Deleted buttons to show
+or hide completed work. It starts checked and remembers your choice across
+products, search results and application restarts. A completed main task hides
+its entire subtree, including unfinished children; under an unfinished parent,
+only completed subtasks are hidden. Hiding changes visibility and preserves
+the saved tasks, export selections and AI-summary scope.
+
+Marking a task Completed while the filter is on immediately hides it. Pending
+edits are saved before its editor is cleared; a failed save keeps it visible.
+Moving a subtask into a completed parent enables **Show completed** so the
+destination remains visible. See the
+[completion visibility design](docs/superpowers/specs/2026-10-20-task-completion-visibility-design.md)
+for the interaction and verification scope.
 
 ## Architecture
 
@@ -418,6 +435,14 @@ The ordinary Windows validation command includes this suite.
 
 ### Trying a different local build
 
+After building Release, `cmake --install build --config Release --prefix dist`
+creates a local runnable Windows folder with Qt, WebEngine and MSVC runtimes.
+Run `dist\Nexus.exe` and keep the entire folder together. This deployment does
+not copy a personal database; normal startup uses the existing configured
+database. The legacy `build.bat` assumes a particular Visual Studio installation
+and also copies the default personal database, so prefer CMake installation
+when preparing a local trial build.
+
 Nexus only runs one instance at a time. Launching a different executable while
 an older copy is running brings the **older copy** to the front; it does not
 switch builds. Closing the window only hides it in the system tray.
@@ -577,11 +602,11 @@ Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/release-v1.0.15
+git push origin agents/release-v1.0.16
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.15 -m "Nexus v1.0.15"
-git push origin v1.0.15
+git tag -a v1.0.16 -m "Nexus v1.0.16"
+git push origin v1.0.16
 ```
 
 The tag workflow checks editor syntax and bundle reproducibility, runs all ten

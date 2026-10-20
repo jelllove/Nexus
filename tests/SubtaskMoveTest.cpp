@@ -3,6 +3,8 @@
 #include "ui/TaskCardDelegate.h"
 #include "ui/MarkdownPreviewDialog.h"
 #include <QDialogButtonBox>
+#include <QCheckBox>
+#include <QStatusBar>
 #include <QFocusEvent>
 #include <QLineEdit>
 #include <QMenu>
@@ -160,6 +162,28 @@ class SubtaskMoveTest : public QObject
         return pane->findChild<QListView *>()->visualRect(model->index(model->rowForSubTaskId(subtaskId)));
     }
 
+    void chooseWorkStatus(int id, bool subtask, int workStatus)
+    {
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *model = pane->findChild<TaskListModel *>();
+        auto *list = pane->findChild<QListView *>();
+        const auto index = model->index(subtask ? model->rowForSubTaskId(id) : model->rowForTaskId(id));
+        QVERIFY(index.isValid());
+        QStyleOptionViewItem option;
+        option.rect = list->visualRect(index);
+        option.font = list->font();
+        const QPoint status = subtask ? TaskCardDelegate::subtaskStatusIconRect(option).center()
+                                      : TaskCardDelegate::workStatusIconRect(option, index).center();
+        QTimer::singleShot(0, this, [workStatus]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier,
+                              menu->actionGeometry(menu->actions()[workStatus]).center());
+        });
+        QCursor::setPos(list->viewport()->mapToGlobal(status));
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, status);
+    }
+
     void showBothParents(bool expandDestination = false)
     {
         auto *pane = m_window->findChild<TaskPane *>();
@@ -184,6 +208,7 @@ private slots:
     void init()
     {
         auto &db = DatabaseManager::instance();
+        QVERIFY(db.setSetting("task_list_show_completed", "true"));
         m_product = db.addProduct("Source product");
         m_task = db.addTask(m_product, "Source main task");
         m_first = db.addSubtask(m_task, "First subtask");
@@ -197,6 +222,276 @@ private slots:
         m_window->show();
         QVERIFY(m_window->findChild<ProductPane *>()->selectProductById(m_product));
         m_window->findChild<TaskPane *>()->findChild<TaskListModel *>()->toggleExpand(m_task);
+    }
+
+    void completionCheckboxPersistsAcrossViews()
+    {
+        auto &db = DatabaseManager::instance();
+        QVERIFY(db.updateTaskWorkStatus(m_task, TaskWorkStatus::Completed));
+        auto *pane = m_window->findChild<TaskPane *>();
+        pane->loadTasks(m_product);
+        auto *model = pane->findChild<TaskListModel *>();
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY2(box, "Tasks must offer Show completed");
+        QVERIFY(box->isChecked());
+        box->setChecked(false);
+        QCOMPARE(model->rowCount(), 0);
+        auto *empty = pane->findChild<QLabel *>("completionEmptyLabel");
+        QVERIFY(empty && empty->isVisible());
+        QCOMPARE(db.getSetting("task_list_show_completed"), QString("false"));
+        pane->loadTasks(m_otherProduct);
+        QCOMPARE(model->rowCount(), 1);
+        pane->loadSearchResults(db.searchTasks("Source"), "Source");
+        QCOMPARE(model->rowCount(), 0);
+        pane->restoreView(m_product, TaskPane::ViewMode::Active, m_task);
+        QCOMPARE(model->rowCount(), 0);
+        TaskPane reopened;
+        QVERIFY(!reopened.findChild<QCheckBox *>("showCompletedCheckBox")->isChecked());
+        reopened.loadTasks(m_product);
+        QCOMPARE(reopened.findChild<TaskListModel *>()->rowCount(), 0);
+        box->setChecked(true);
+        QCOMPARE(model->rowCount(), 4);
+    }
+
+    void completionFilterSavesAndClearsHiddenEditor()
+    {
+        auto &db = DatabaseManager::instance();
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *editor = m_window->findChild<EditorPane *>();
+        editor->loadSubTask(m_second);
+        editor->findChild<EditorBridge *>()->setContent("<p>Keep hidden edits</p>");
+        QVERIFY(db.updateSubtaskWorkStatus(m_second, TaskWorkStatus::Completed));
+        pane->loadTasks(m_product);
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        QCOMPARE(db.getSubtask(m_second).content, QString("<p>Keep hidden edits</p>"));
+        QCOMPARE(editor->currentSubTaskId(), -1);
+        QVERIFY(!pane->findChild<QListView *>()->currentIndex().isValid());
+    }
+
+    void completionFilterClearsSelectionWhenEditorAndSelectionDiffer()
+    {
+        auto &db = DatabaseManager::instance();
+        const int visible = db.addTask(m_product, "Visible task");
+        QVERIFY(db.updateTaskWorkStatus(m_task, TaskWorkStatus::Completed));
+        auto *pane = m_window->findChild<TaskPane *>();
+        pane->loadTasks(m_product);
+        auto *editor = m_window->findChild<EditorPane *>();
+        editor->loadTask(m_task);
+        auto *model = pane->findChild<TaskListModel *>();
+        auto *list = pane->findChild<QListView *>();
+        list->setCurrentIndex(model->index(model->rowForTaskId(visible)));
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        QCOMPARE(editor->currentTaskId(), -1);
+        QVERIFY(!list->currentIndex().isValid());
+    }
+
+    void completionFilterSaveFailureRestoresCheckbox()
+    {
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *editor = m_window->findChild<EditorPane *>();
+        QVERIFY(DatabaseManager::instance().updateSubtaskWorkStatus(m_second, TaskWorkStatus::Completed));
+        editor->loadSubTask(m_second);
+        editor->findChild<EditorBridge *>()->setContent("<p>Pending</p>");
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        QSqlQuery query;
+        QVERIFY(query.exec("PRAGMA query_only=ON"));
+        answerWarning();
+        box->setChecked(false);
+        QVERIFY(box->isChecked());
+        QCOMPARE(editor->currentSubTaskId(), m_second);
+        QVERIFY(query.exec("PRAGMA query_only=OFF"));
+        QVERIFY(editor->savePendingContent());
+        QCOMPARE(DatabaseManager::instance().getSubtask(m_second).content, QString("<p>Pending</p>"));
+    }
+
+    void completionFilterKeepsVisibleSelectionAndCursor()
+    {
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *model = pane->findChild<TaskListModel *>();
+        auto *list = pane->findChild<QListView *>();
+        list->setCurrentIndex(model->index(model->rowForSubTaskId(m_second)));
+        auto *editor = m_window->findChild<EditorPane *>();
+        editor->loadSubTask(m_second);
+        QSignalSpy loads(editor->findChild<EditorBridge *>(), &EditorBridge::loadContentRequested);
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        QCOMPARE(list->currentIndex().data(TaskListModel::SubTaskIdRole).toInt(), m_second);
+        QCOMPARE(editor->currentSubTaskId(), m_second);
+        QCOMPARE(loads.count(), 0);
+    }
+
+    void filteredDragUsesCompleteSiblingPositions()
+    {
+        auto &db = DatabaseManager::instance();
+        QVERIFY(db.updateSubtaskWorkStatus(m_first, TaskWorkStatus::Completed));
+        auto *pane = m_window->findChild<TaskPane *>();
+        pane->loadTasks(m_product);
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        auto *list = pane->findChild<QListView *>();
+        const QRect target = subtaskRect(m_second);
+        dragMouse(list, subtaskRect(m_third).center(), QPoint(target.center().x(), target.top() + 2));
+        checkOrder(m_task, {m_first, m_third, m_second});
+    }
+
+    void filteredMoveRevealsCompletedDestination()
+    {
+        auto &db = DatabaseManager::instance();
+        QVERIFY(db.updateTaskWorkStatus(m_destination, TaskWorkStatus::Completed));
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        requestMove(m_second, m_destination, -1);
+        QVERIFY(box->isChecked());
+        QCOMPARE(db.getSetting("task_list_show_completed"), QString("true"));
+        QCOMPARE(pane->findChild<QListView *>()->currentIndex().data(TaskListModel::SubTaskIdRole).toInt(), m_second);
+    }
+
+    void completionStatusPopupSavesAndHides_data()
+    {
+        QTest::addColumn<bool>("subtask");
+        QTest::addColumn<bool>("editChild");
+        QTest::newRow("main-task") << false << false;
+        QTest::newRow("subtask") << true << true;
+        QTest::newRow("main-parent-of-open-subtask") << false << true;
+    }
+
+    void completionStatusPopupSavesAndHides()
+    {
+        QFETCH(bool, subtask);
+        QFETCH(bool, editChild);
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *model = pane->findChild<TaskListModel *>();
+        auto *list = pane->findChild<QListView *>();
+        auto *editor = m_window->findChild<EditorPane *>();
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        if (editChild) editor->loadSubTask(m_second);
+        else editor->loadTask(m_task);
+        editor->findChild<EditorBridge *>()->setContent("<p>Saved before completing</p>");
+        chooseWorkStatus(subtask ? m_second : m_task, subtask, 3);
+        auto &db = DatabaseManager::instance();
+        QCOMPARE(subtask ? db.getSubtask(m_second).workStatus : db.getTask(m_task).workStatus, TaskWorkStatus::Completed);
+        QCOMPARE(editChild ? db.getSubtask(m_second).content : db.getTask(m_task).content, QString("<p>Saved before completing</p>"));
+        QCOMPARE(subtask ? model->rowForSubTaskId(m_second) : model->rowForTaskId(m_task), -1);
+        QCOMPARE(editor->currentSubTaskId(), -1);
+        QVERIFY(!list->currentIndex().isValid());
+        box->setChecked(true);
+        QVERIFY((subtask ? model->rowForSubTaskId(m_second) : model->rowForTaskId(m_task)) >= 0);
+    }
+
+    void completionSearchCountsAndRestore()
+    {
+        auto &db = DatabaseManager::instance();
+        QVERIFY(db.updateTaskWorkStatus(m_destination, TaskWorkStatus::Completed));
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        QVERIFY(QMetaObject::invokeMethod(m_window.get(), "onSearchRequested", Q_ARG(QString, "main")));
+        QVERIFY(m_window->statusBar()->currentMessage().contains("1 result(s); 1 completed hidden"));
+        box->setChecked(true);
+        QCOMPARE(m_window->statusBar()->currentMessage(), QString("Found 2 result(s)"));
+        QVERIFY(QMetaObject::invokeMethod(m_window.get(), "onSearchCleared"));
+        QCOMPARE(pane->viewMode(), TaskPane::ViewMode::Active);
+        QVERIFY(box->isChecked());
+        QCOMPARE(pane->findChild<TaskListModel *>()->currentProductId(), m_product);
+    }
+
+    void completionStatusFailureKeepsVisibleNote_data()
+    {
+        QTest::addColumn<bool>("subtask");
+        QTest::addColumn<bool>("failSave");
+        QTest::newRow("task-status-write") << false << false;
+        QTest::newRow("subtask-status-write") << true << false;
+        QTest::newRow("task-pending-save") << false << true;
+        QTest::newRow("subtask-pending-save") << true << true;
+    }
+
+    void completionStatusFailureKeepsVisibleNote()
+    {
+        QFETCH(bool, subtask);
+        QFETCH(bool, failSave);
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *model = pane->findChild<TaskListModel *>();
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        auto *editor = m_window->findChild<EditorPane *>();
+        if (subtask) editor->loadSubTask(m_second);
+        else editor->loadTask(m_task);
+        editor->findChild<EditorBridge *>()->setContent("<p>Preserve on failure</p>");
+        QSqlQuery query;
+        if (failSave) QVERIFY(query.exec("PRAGMA query_only=ON"));
+        else QVERIFY(query.exec(QString(
+            "CREATE TEMP TRIGGER fail_work_status BEFORE UPDATE OF work_status ON %1 "
+            "BEGIN SELECT RAISE(ABORT, 'simulated status write failure'); END")
+            .arg(subtask ? "subtasks" : "tasks")));
+        auto *warnings = new QTimer(this);
+        connect(warnings, &QTimer::timeout, this, [warnings]() {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                warnings->stop();
+                box->accept();
+                warnings->deleteLater();
+            }
+        });
+        warnings->start(10);
+        chooseWorkStatus(subtask ? m_second : m_task, subtask, 3);
+        QVERIFY(query.exec("PRAGMA query_only=OFF"));
+        QVERIFY(query.exec("DROP TRIGGER IF EXISTS fail_work_status"));
+        auto &db = DatabaseManager::instance();
+        QCOMPARE(subtask ? db.getSubtask(m_second).workStatus : db.getTask(m_task).workStatus, TaskWorkStatus::NotStarted);
+        QVERIFY((subtask ? model->rowForSubTaskId(m_second) : model->rowForTaskId(m_task)) >= 0);
+        QVERIFY(editor->savePendingContent());
+        QCOMPARE(subtask ? db.getSubtask(m_second).content : db.getTask(m_task).content, QString("<p>Preserve on failure</p>"));
+    }
+
+    void completionPreferenceFailureKeepsSessionView()
+    {
+        auto *pane = m_window->findChild<TaskPane *>();
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        QSqlQuery query;
+        QVERIFY(query.exec("PRAGMA query_only=ON"));
+        answerWarning();
+        box->setChecked(false);
+        QVERIFY(!box->isChecked());
+        QVERIFY(!pane->findChild<TaskListModel *>()->property("showCompleted").toBool());
+        QVERIFY(query.exec("PRAGMA query_only=OFF"));
+        QCOMPARE(DatabaseManager::instance().getSetting("task_list_show_completed"), QString("true"));
+    }
+
+    void filteredMenuMoveUsesVisibleNeighbor()
+    {
+        auto &db = DatabaseManager::instance();
+        QVERIFY(db.updateSubtaskWorkStatus(m_second, TaskWorkStatus::Completed));
+        auto *pane = m_window->findChild<TaskPane *>();
+        pane->loadTasks(m_product);
+        auto *box = pane->findChild<QCheckBox *>("showCompletedCheckBox");
+        QVERIFY(box);
+        box->setChecked(false);
+        chooseAction(m_third, "Move Up");
+        checkOrder(m_task, {m_third, m_first, m_second});
+    }
+
+    void completionBeforeEditorReadyDoesNotReloadHiddenContent()
+    {
+        QVERIFY(DatabaseManager::instance().updateTaskContent(m_task, "<p>Hidden content</p>"));
+        EditorPane editor;
+        editor.loadTask(m_task);
+        editor.clear();
+        QSignalSpy loads(editor.findChild<EditorBridge *>(), &EditorBridge::loadContentRequested);
+        QVERIFY(QMetaObject::invokeMethod(&editor, "onEditorReady"));
+        QCOMPARE(loads.count(), 0);
     }
 
     void menuOffersReorderingAndMoving()
@@ -987,6 +1282,7 @@ private slots:
         QSqlQuery query;
         QVERIFY(query.exec("PRAGMA query_only=OFF"));
         QVERIFY(query.exec("DROP TRIGGER IF EXISTS fail_move"));
+        QVERIFY(query.exec("DROP TRIGGER IF EXISTS fail_work_status"));
         QVERIFY(query.exec("DELETE FROM products"));
     }
 };

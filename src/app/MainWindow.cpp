@@ -106,6 +106,35 @@ void MainWindow::setupUi()
     m_productPane = new ProductPane(this);
     m_taskPane = new TaskPane(this);
     m_editorPane = new EditorPane(this);
+    // Status controls may select a different row from the note currently being edited.
+    auto wouldHideEditor = [this](int taskId, int subtaskId) {
+        auto &db = DatabaseManager::instance();
+        const int editedSubtask = m_editorPane->currentSubTaskId();
+        const int editedTask = editedSubtask > 0 ? db.getSubtask(editedSubtask).taskId
+                                                : m_editorPane->currentTaskId();
+        if (editedTask <= 0) return false;
+        if (taskId > 0 || subtaskId > 0)
+            return (taskId > 0 && taskId == editedTask) ||
+                   (subtaskId > 0 && subtaskId == editedSubtask);
+        return db.getTask(editedTask).workStatus == TaskWorkStatus::Completed ||
+               (editedSubtask > 0 && db.getSubtask(editedSubtask).workStatus == TaskWorkStatus::Completed);
+    };
+    m_taskPane->setBeforeHideCallback([this, wouldHideEditor](int taskId, int subtaskId) {
+        if (!wouldHideEditor(taskId, subtaskId) || m_editorPane->savePendingContent()) return true;
+        QMessageBox::warning(this, "Show completed",
+            "The current note could not be saved. The task view will stay unchanged.");
+        return false;
+    });
+    connect(m_taskPane, &TaskPane::completedItemsHidden, this,
+            [this, wouldHideEditor](int taskId, int subtaskId) {
+        if (wouldHideEditor(taskId, subtaskId)) {
+            m_taskPane->clearSelection();
+            m_editorPane->clear();
+        }
+    });
+    connect(m_taskPane, &TaskPane::viewMessage, this, [this](const QString &message) {
+        statusBar()->showMessage(message, 3000);
+    });
 
     m_splitter->addWidget(m_productPane);
     m_splitter->addWidget(m_taskPane);
@@ -372,12 +401,6 @@ void MainWindow::onSearchRequested(const QString &query)
     const auto results = DatabaseManager::instance().searchTasks(trimmedQuery);
     m_taskPane->loadSearchResults(results, trimmedQuery);
     m_searchActive = true;
-
-    if (results.isEmpty()) {
-        statusBar()->showMessage(QString("No results found for '%1'").arg(trimmedQuery), 3000);
-    } else {
-        statusBar()->showMessage(QString("Found %1 result(s)").arg(results.size()), 3000);
-    }
 }
 
 void MainWindow::onSearchCleared()

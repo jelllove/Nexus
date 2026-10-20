@@ -1,5 +1,6 @@
 #include "TaskListModel.h"
 #include "db/DatabaseManager.h"
+#include <QHash>
 
 TaskListModel::TaskListModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -78,7 +79,11 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
         case IsSubTaskRole:
             return false;
         case HasSubTasksRole:
-            return DatabaseManager::instance().getSubtaskCount(t.id) > 0;
+            if (m_showCompleted) return DatabaseManager::instance().getSubtaskCount(t.id) > 0;
+            for (const auto &subtask : DatabaseManager::instance().getSubtasks(t.id)) {
+                if (subtask.workStatus != TaskWorkStatus::Completed) return true;
+            }
+            return false;
         case IsExpandedRole:
             return m_expandedTasks.contains(t.id);
         case IsActiveTaskRole:
@@ -89,6 +94,7 @@ QVariant TaskListModel::data(const QModelIndex &index, int role) const
 
 void TaskListModel::loadTasks(int productId, TaskStatus status)
 {
+    m_searchResults = false;
     m_currentProductId = productId;
     m_currentStatus = status;
     beginResetModel();
@@ -99,6 +105,7 @@ void TaskListModel::loadTasks(int productId, TaskStatus status)
 
 void TaskListModel::loadDeletedTasks()
 {
+    m_searchResults = false;
     m_currentProductId = -1;
     m_currentStatus = TaskStatus::Deleted;
     beginResetModel();
@@ -109,6 +116,7 @@ void TaskListModel::loadDeletedTasks()
 
 void TaskListModel::loadSearchResults(const QList<Task> &tasks)
 {
+    m_searchResults = true;
     beginResetModel();
     m_tasks = tasks;
     rebuildDisplayRows();
@@ -119,6 +127,7 @@ void TaskListModel::rebuildDisplayRows()
 {
     m_displayRows.clear();
     for (const Task &t : m_tasks) {
+        if (!m_showCompleted && t.workStatus == TaskWorkStatus::Completed) continue;
         DisplayRow mainRow;
         mainRow.type = DisplayRow::MainTask;
         mainRow.task = t;
@@ -127,6 +136,7 @@ void TaskListModel::rebuildDisplayRows()
         if (m_expandedTasks.contains(t.id)) {
             auto subtasks = DatabaseManager::instance().getSubtasks(t.id);
             for (const SubTask &st : subtasks) {
+                if (!m_showCompleted && st.workStatus == TaskWorkStatus::Completed) continue;
                 DisplayRow subRow;
                 subRow.type = DisplayRow::SubTaskRow;
                 subRow.subtask = st;
@@ -193,11 +203,38 @@ void TaskListModel::removeTask(int row)
 
 void TaskListModel::refresh()
 {
+    if (m_searchResults) {
+        QList<Task> refreshed;
+        for (const auto &task : m_tasks) {
+            const Task current = DatabaseManager::instance().getTask(task.id);
+            if (current.id > 0) refreshed.append(current);
+        }
+        loadSearchResults(refreshed);
+        return;
+    }
     if (m_currentStatus == TaskStatus::Deleted) {
         loadDeletedTasks();
     } else if (m_currentProductId > 0) {
         loadTasks(m_currentProductId, m_currentStatus);
     }
+}
+
+void TaskListModel::setShowCompleted(bool show)
+{
+    if (m_showCompleted == show) return;
+    beginResetModel();
+    m_showCompleted = show;
+    rebuildDisplayRows();
+    endResetModel();
+}
+
+int TaskListModel::visibleTaskCount() const
+{
+    int count = 0;
+    for (const auto &task : m_tasks) {
+        if (m_showCompleted || task.workStatus != TaskWorkStatus::Completed) ++count;
+    }
+    return count;
 }
 
 void TaskListModel::toggleExpand(int taskId)
@@ -283,12 +320,17 @@ bool TaskListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int
     // Find the task and its target position in m_tasks
     int fromTaskId = m_displayRows[sourceRow].task.id;
     int fromPriority = static_cast<int>(m_displayRows[sourceRow].task.priority);
+    const Task sourceTask = m_displayRows[sourceRow].task;
+    auto inSourceGroup = [&sourceTask](const Task &task) {
+        return task.priority == sourceTask.priority && task.productId == sourceTask.productId &&
+               task.status == sourceTask.status;
+    };
 
     // Collect task ids in this priority group in display order
     QList<int> groupIds;
     for (const auto &dr : m_displayRows) {
         if (dr.type == DisplayRow::MainTask &&
-            static_cast<int>(dr.task.priority) == fromPriority) {
+            inSourceGroup(dr.task)) {
             groupIds.append(dr.task.id);
         }
     }
@@ -301,7 +343,7 @@ bool TaskListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int
     int mainCount = 0;
     for (int i = 0; i < m_displayRows.size() && i < destinationRow; ++i) {
         if (m_displayRows[i].type == DisplayRow::MainTask &&
-            static_cast<int>(m_displayRows[i].task.priority) == fromPriority) {
+            inSourceGroup(m_displayRows[i].task)) {
             mainCount++;
         }
     }
@@ -309,8 +351,27 @@ bool TaskListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int
     if (destinationRow > sourceRow) targetIdx--;
 
     groupIds.move(fromIdx, targetIdx);
-    if (!DatabaseManager::instance().reorderTasks(groupIds)) {
+    // Reorder visible slots in the complete group so hidden tasks keep their slots.
+    QList<int> completeGroup;
+    int visiblePosition = 0;
+    for (const auto &task : DatabaseManager::instance().getTasksForProduct(
+             sourceTask.productId, sourceTask.status)) {
+        if (static_cast<int>(task.priority) != fromPriority) continue;
+        if (groupIds.contains(task.id)) completeGroup.append(groupIds[visiblePosition++]);
+        else completeGroup.append(task.id);
+    }
+    if (visiblePosition != groupIds.size()) return false;
+    if (!DatabaseManager::instance().reorderTasks(completeGroup)) {
         return false;
+    }
+    if (m_searchResults) {
+        // Preserve search-result slots for other groups while showing the move immediately.
+        QHash<int, Task> tasksById;
+        for (const auto &task : m_tasks) tasksById.insert(task.id, task);
+        int position = 0;
+        for (auto &task : m_tasks) {
+            if (groupIds.contains(task.id)) task = tasksById.value(groupIds[position++]);
+        }
     }
     refresh();
     return true;

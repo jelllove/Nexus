@@ -1,5 +1,6 @@
 #include "TaskListView.h"
 #include "models/TaskListModel.h"
+#include "db/DatabaseManager.h"
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -141,9 +142,10 @@ TaskListView::DropTarget TaskListView::dropTargetAt(const QPoint &position) cons
         const bool after = appendAtEnd || position.y() >= targetRect.center().y();
         if (!appendAtEnd) {
             result.position = 0;
-            for (int row = parent.row() + 1; row < target.row(); ++row) {
-                if (m_taskModel->index(row).data(TaskListModel::SubTaskIdRole).toInt() != m_pressedSubtaskId)
-                    ++result.position;
+            for (const auto &sibling : DatabaseManager::instance().getSubtasks(result.taskId)) {
+                if (sibling.id == m_pressedSubtaskId) continue;
+                if (sibling.id == targetId) break;
+                ++result.position;
             }
             if (after) ++result.position;
         }
@@ -154,9 +156,12 @@ TaskListView::DropTarget TaskListView::dropTargetAt(const QPoint &position) cons
 
     const int sourceParent = m_taskModel->index(sourceRow).data(TaskListModel::ParentTaskIdRole).toInt();
     if (sourceParent == result.taskId) {
-        const int sourcePosition = sourceRow - parent.row() - 1;
-        const bool sourceIsLast = sourceRow + 1 == m_taskModel->rowCount() ||
-            !m_taskModel->index(sourceRow + 1).data(TaskListModel::IsSubTaskRole).toBool();
+        const auto siblings = DatabaseManager::instance().getSubtasks(result.taskId);
+        int sourcePosition = -1;
+        for (int i = 0; i < siblings.size(); ++i) {
+            if (siblings[i].id == m_pressedSubtaskId) sourcePosition = i;
+        }
+        const bool sourceIsLast = sourcePosition == siblings.size() - 1;
         if (result.position == sourcePosition || (result.position == -1 && sourceIsLast))
             return {};
     }

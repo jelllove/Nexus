@@ -176,6 +176,10 @@ void EditorPane::loadSubTask(int subTaskId)
 void EditorPane::clear()
 {
     emit linkHovered(QString());
+    m_autoSaveTimer->stop();
+    m_pendingContent.clear();
+    m_pendingTitle.clear();
+    m_pendingTimestamp.clear();
     m_currentTaskId = -1;
     m_currentSubTaskId = -1;
     m_currentContent.clear();

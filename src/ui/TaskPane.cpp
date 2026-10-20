@@ -19,6 +19,7 @@
 #include <QCheckBox>
 #include <QTreeWidget>
 #include <QHeaderView>
+#include <QSignalBlocker>
 
 TaskPane::TaskPane(QWidget *parent)
     : QWidget(parent)
@@ -68,6 +69,22 @@ void TaskPane::setupUi()
 
     // List view with card delegate
     m_model = new TaskListModel(this);
+    m_showCompleted = new QCheckBox("Show completed", this);
+    m_showCompleted->setObjectName("showCompletedCheckBox");
+    m_showCompleted->setStyleSheet(
+        "QCheckBox { color: #2c3e50; padding: 4px 8px; }");
+    m_showCompleted->setChecked(
+        DatabaseManager::instance().getSetting("task_list_show_completed", "true") != "false");
+    m_model->setShowCompleted(m_showCompleted->isChecked());
+    layout->addWidget(m_showCompleted);
+    connect(m_showCompleted, &QCheckBox::toggled, this, &TaskPane::setShowCompleted);
+    m_completionEmptyLabel = new QLabel(
+        "All matching tasks are completed. Check Show completed to see them.", this);
+    m_completionEmptyLabel->setObjectName("completionEmptyLabel");
+    m_completionEmptyLabel->setWordWrap(true);
+    m_completionEmptyLabel->setStyleSheet("QLabel { color: #536879; padding: 12px; }");
+    m_completionEmptyLabel->hide();
+    layout->addWidget(m_completionEmptyLabel);
     auto *taskListView = new TaskListView(m_model, this);
     m_listView = taskListView;
     connect(taskListView, &TaskListView::subTaskMoveRequested,
@@ -85,6 +102,18 @@ void TaskPane::setupUi()
     m_listView->setDragDropMode(QAbstractItemView::InternalMove);
     m_listView->setDefaultDropAction(Qt::MoveAction);
     layout->addWidget(m_listView, 1);
+    connect(m_model, &QAbstractItemModel::modelAboutToBeReset, this, [this]() {
+        const auto index = m_listView->currentIndex();
+        m_resetTaskId = m_model->taskIdAt(index.row());
+        m_resetSubtaskId = index.data(TaskListModel::SubTaskIdRole).toInt();
+    });
+    connect(m_model, &QAbstractItemModel::modelReset, this, [this]() {
+        const int row = m_resetSubtaskId > 0 ? m_model->rowForSubTaskId(m_resetSubtaskId)
+                                           : m_model->rowForTaskId(m_resetTaskId);
+        m_listView->setCurrentIndex(row >= 0 ? m_model->index(row) : QModelIndex());
+        if (row < 0) m_model->setActiveTaskId(-1);
+        updateCompletionFeedback();
+    });
 
     // Add button
     m_addButton = new QPushButton("+ Add Task", this);
@@ -140,6 +169,53 @@ void TaskPane::setupUi()
         m_listView->viewport()->update();
     });
     m_refreshTimer->start();
+}
+
+void TaskPane::setShowCompleted(bool show)
+{
+    if (show == m_model->showCompleted()) return;
+    if (!show && m_beforeHide && !m_beforeHide(0, 0)) {
+        const QSignalBlocker blocker(m_showCompleted);
+        m_showCompleted->setChecked(true);
+        return;
+    }
+    {
+        const QSignalBlocker blocker(m_showCompleted);
+        m_showCompleted->setChecked(show);
+    }
+    m_model->setShowCompleted(show);
+    if (!show) emit completedItemsHidden(0, 0);
+    if (!DatabaseManager::instance().setSetting("task_list_show_completed", show ? "true" : "false")) {
+        QMessageBox::warning(this, "Show completed",
+            "The preference could not be remembered. The current view will be kept for this session.");
+    }
+}
+
+void TaskPane::updateCompletionFeedback()
+{
+    const int visible = m_model->visibleTaskCount();
+    const int hidden = m_model->hiddenTaskCount();
+    m_completionEmptyLabel->setVisible(visible == 0 && hidden > 0);
+    if (m_showingSearchResults) {
+        emit viewMessage(hidden > 0
+            ? QString("Found %1 result(s); %2 completed hidden").arg(visible).arg(hidden)
+            : QString("Found %1 result(s)").arg(visible));
+    }
+}
+
+void TaskPane::applyWorkStatus(int id, bool subtask, TaskWorkStatus status)
+{
+    const bool hiding = !m_model->showCompleted() && status == TaskWorkStatus::Completed;
+    if (hiding && m_beforeHide && !m_beforeHide(subtask ? 0 : id, subtask ? id : 0)) return;
+    auto &db = DatabaseManager::instance();
+    const bool saved = subtask ? db.updateSubtaskWorkStatus(id, status)
+                               : db.updateTaskWorkStatus(id, status);
+    if (!saved) {
+        QMessageBox::warning(this, "Task status", "The task status could not be saved. Please try again.");
+        return;
+    }
+    refreshCurrentList();
+    if (hiding) emit completedItemsHidden(subtask ? 0 : id, subtask ? id : 0);
 }
 
 void TaskPane::updateFilterButtonStyles()
@@ -225,7 +301,12 @@ void TaskPane::setupContextMenu()
             QAction *renameAction = menu.addAction("Rename");
             menu.addSeparator();
             const int parentId = index.data(TaskListModel::ParentTaskIdRole).toInt();
-            const auto siblings = DatabaseManager::instance().getSubtasks(parentId);
+            auto siblings = DatabaseManager::instance().getSubtasks(parentId);
+            if (!m_model->showCompleted()) {
+                for (int i = siblings.size() - 1; i >= 0; --i) {
+                    if (siblings[i].workStatus == TaskWorkStatus::Completed) siblings.removeAt(i);
+                }
+            }
             int position = -1;
             for (int i = 0; i < siblings.size(); ++i) {
                 if (siblings[i].id == subtaskId) position = i;
@@ -244,16 +325,24 @@ void TaskPane::setupContextMenu()
             QAction *selected = menu.exec(m_listView->viewport()->mapToGlobal(pos));
             for (int i = 0; i < 5; ++i) {
                 if (selected == statusActions[i]) {
-                    DatabaseManager::instance().updateSubtaskWorkStatus(
-                        subtaskId, static_cast<TaskWorkStatus>(i));
-                    refreshCurrentList();
+                    applyWorkStatus(subtaskId, true, static_cast<TaskWorkStatus>(i));
                     return;
                 }
             }
 
             if (selected == moveUpAction || selected == moveDownAction) {
-                emit subTaskMoveRequested(subtaskId, parentId,
-                    position + (selected == moveUpAction ? -1 : 1));
+                const int neighbor = siblings[position + (selected == moveUpAction ? -1 : 1)].id;
+                const auto allSiblings = DatabaseManager::instance().getSubtasks(parentId);
+                int destination = 0;
+                for (const auto &sibling : allSiblings) {
+                    if (sibling.id == subtaskId) continue;
+                    if (sibling.id == neighbor) {
+                        if (selected == moveDownAction) ++destination;
+                        break;
+                    }
+                    ++destination;
+                }
+                emit subTaskMoveRequested(subtaskId, parentId, destination);
             } else if (selected == moveToAction) {
                 showMoveSubTaskDialog(subtaskId);
             } else if (selected == renameAction) {
@@ -382,8 +471,7 @@ void TaskPane::setupContextMenu()
         // Check status actions
         for (int i = 0; i < 5; ++i) {
             if (selected == statusActions[i]) {
-                DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
-                refreshCurrentList();
+                applyWorkStatus(taskId, false, static_cast<TaskWorkStatus>(i));
                 return;
             }
         }
@@ -500,6 +588,9 @@ void TaskPane::showMoveSubTaskDialog(int subtaskId)
 bool TaskPane::revealSubTask(int subtaskId, bool followParent)
 {
     const SubTask subtask = DatabaseManager::instance().getSubtask(subtaskId);
+    if (subtask.workStatus == TaskWorkStatus::Completed ||
+        DatabaseManager::instance().getTask(subtask.taskId).workStatus == TaskWorkStatus::Completed)
+        setShowCompleted(true);
     if (followParent) {
         const Task parent = DatabaseManager::instance().getTask(subtask.taskId);
         m_showingArchived = parent.status == TaskStatus::Archived;
@@ -647,6 +738,14 @@ int TaskPane::selectedTaskId() const
     return m_model->taskIdAt(index.row());
 }
 
+void TaskPane::clearSelection()
+{
+    m_model->setActiveTaskId(-1);
+    m_listView->clearSelection();
+    m_listView->setCurrentIndex(QModelIndex());
+    m_listView->viewport()->update();
+}
+
 void TaskPane::onTaskClicked(const QModelIndex &index)
 {
     QPoint clickPos = m_listView->viewport()->mapFromGlobal(QCursor::pos());
@@ -771,8 +870,7 @@ void TaskPane::showWorkStatusPopup(const QModelIndex &index, const QPoint &globa
     int taskId = m_model->taskIdAt(index.row());
     for (int i = 0; i < menu.actions().size(); ++i) {
         if (selected == menu.actions()[i]) {
-            DatabaseManager::instance().updateTaskWorkStatus(taskId, static_cast<TaskWorkStatus>(i));
-            refreshCurrentList();
+            applyWorkStatus(taskId, false, static_cast<TaskWorkStatus>(i));
             return;
         }
     }
@@ -806,9 +904,7 @@ void TaskPane::showSubTaskStatusPopup(int subtaskId, int currentStatus, const QP
 
     for (int i = 0; i < menu.actions().size(); ++i) {
         if (selected == menu.actions()[i]) {
-            DatabaseManager::instance().updateSubtaskWorkStatus(
-                subtaskId, static_cast<TaskWorkStatus>(i));
-            refreshCurrentList();
+            applyWorkStatus(subtaskId, true, static_cast<TaskWorkStatus>(i));
             return;
         }
     }

@@ -11,6 +11,8 @@ Help users manage tasks and rich notes in a desktop application.
 
 - As a note reader, I want to inspect a hyperlink's destination by hovering over
   it before deciding whether to open it.
+- As a task-list user, I want one checkbox to hide completed tasks and show
+  them again when needed.
 
 ## Functional Requirements
 
@@ -32,12 +34,33 @@ Help users manage tasks and rich notes in a desktop application.
   to HTTPS. Reject invalid addresses and executable or data URL schemes without
   closing the dialog or changing content.
 
+### Task completion visibility
+
+- Provide one checkbox in the existing Tasks pane to hide and show tasks whose
+  work status is Completed. Hiding must preserve the underlying tasks and notes.
+- Default to showing completed items and remember the preference across products,
+  lifecycle views, search results and application restarts.
+- Hide a completed main task with its subtree; under unfinished main tasks,
+  hide completed subtasks individually. Preserve expansion and visible selection.
+- Save pending edits before hiding an open note. A failed save or status update
+  must preserve the prior view and note. Explain when filtering hides all hits.
+- Preserve hidden items during reorder and movement. Reveal a completed move
+  destination by enabling the checkbox. Export and summary scopes are independent.
+- See the [completion visibility design](docs/superpowers/specs/2026-10-20-task-completion-visibility-design.md)
+  for full behavior and verification coverage.
+
 ## Non-Goals
 
 - Fetching link previews, page titles or remote metadata on hover.
 - Changing the existing Ctrl/Command-click behavior for opening links.
 
 ## Acceptance Criteria
+
+- The completion checkbox filters main and subtask work statuses in all Tasks
+  views, persists its preference, preserves note edits and provides accurate
+  search counts and an explanation when all results are hidden.
+- Regression coverage includes subtree visibility, expansion/selection restore,
+  save/status/settings failures and movement through hidden tasks or siblings.
 
 - Hovering editable hyperlink text, including nested formatting, shows its
   destination through DOM events and the editor bridge without
@@ -51,4 +74,4 @@ Help users manage tasks and rich notes in a desktop application.
 
 ## Open Questions
 
-None for hyperlink hover display and authoring.
+None for hyperlink hover/authoring and task completion visibility.

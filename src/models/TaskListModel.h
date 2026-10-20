@@ -15,6 +15,7 @@ struct DisplayRow {
 class TaskListModel : public QAbstractListModel
 {
     Q_OBJECT
+    Q_PROPERTY(bool showCompleted READ showCompleted WRITE setShowCompleted)
 
 public:
     enum Roles {
@@ -62,6 +63,10 @@ public:
     int addTask(int productId, const QString &title, TaskPriority priority = TaskPriority::Medium, const QDateTime &dueDate = QDateTime());
     void removeTask(int row);
     void refresh();
+    bool showCompleted() const { return m_showCompleted; }
+    void setShowCompleted(bool show);
+    int visibleTaskCount() const;
+    int hiddenTaskCount() const { return m_tasks.size() - visibleTaskCount(); }
 
     void toggleExpand(int taskId);
     bool isExpanded(int taskId) const;
@@ -76,6 +81,8 @@ private:
     void rebuildDisplayRows();
 
     QList<Task> m_tasks;
+    bool m_showCompleted = true;
+    bool m_searchResults = false;
     QList<DisplayRow> m_displayRows;
     QSet<int> m_expandedTasks;
     int m_activeTaskId = -1;

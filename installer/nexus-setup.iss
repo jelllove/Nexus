@@ -3,7 +3,7 @@
 
 #define MyAppName "Nexus"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.15"
+  #define MyAppVersion "1.0.16"
 #endif
 #define MyAppPublisher "jelllove"
 #define MyAppURL "https://www.jelllove.com"

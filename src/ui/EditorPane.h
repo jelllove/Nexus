@@ -22,6 +22,7 @@ public:
     bool saveCurrentContent();
     bool savePendingContent();
     int currentSubTaskId() const { return m_currentSubTaskId; }
+    int currentTaskId() const { return m_currentTaskId; }
     void resetTitleGenerationPending() { m_titleGenerationPending = false; }
 
 signals:

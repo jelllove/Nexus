@@ -30,6 +30,9 @@ private slots:
     void taskReorderDoesNotCommitCallerTransaction();
     void productModelEditingAndReordering();
     void taskModelExpansion();
+    void taskModelCompletionFilter();
+    void filteredTaskReorderPreservesHiddenSlots();
+    void filteredSearchReorderPreservesOtherGroups();
     void taskModelReordersWithinPriority();
     void taskModelReportsReorderFailure();
     void deletedTaskModelReportsDeletedStatus();
@@ -44,6 +47,108 @@ private slots:
     void operationHistoryTracksSettingReplacement();
     void operationHistoryMigratesExistingDatabase();
 };
+
+void NexusCoreTests::taskModelCompletionFilter()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Filter");
+    QList<int> tasks;
+    for (int i = 0; i < 5; ++i) {
+        const int id = db.addTask(product, "Filter task");
+        QVERIFY(db.updateTaskWorkStatus(id, static_cast<TaskWorkStatus>(i)));
+        tasks.append(id);
+    }
+    const int unfinishedChild = db.addSubtask(tasks[3], "Unfinished child");
+    const int doneChild = db.addSubtask(tasks[0], "Done child");
+    QVERIFY(db.updateSubtaskWorkStatus(doneChild, TaskWorkStatus::Completed));
+    TaskListModel model;
+    QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+    model.loadTasks(product);
+    model.toggleExpand(tasks[3]);
+    model.toggleExpand(tasks[0]);
+    QCOMPARE(model.rowCount(), 7);
+    QSqlQuery writes;
+    QVERIFY(writes.exec("SELECT COUNT(*) FROM database_operations"));
+    QVERIFY(writes.next());
+    const int writesBefore = writes.value(0).toInt();
+    writes.finish();
+    QVERIFY2(model.setProperty("showCompleted", false), "Completion filter must be available");
+    QCOMPARE(model.rowCount(), 4);
+    QCOMPARE(model.rowForTaskId(tasks[3]), -1);
+    QCOMPARE(model.rowForSubTaskId(unfinishedChild), -1);
+    QCOMPARE(model.rowForSubTaskId(doneChild), -1);
+    QVERIFY(!model.index(model.rowForTaskId(tasks[0])).data(TaskListModel::HasSubTasksRole).toBool());
+    QVERIFY(model.isExpanded(tasks[0]));
+    QVERIFY(model.setProperty("showCompleted", true));
+    QCOMPARE(model.rowCount(), 7);
+    QVERIFY(model.rowForSubTaskId(doneChild) >= 0);
+    QVERIFY(writes.exec("SELECT COUNT(*) FROM database_operations"));
+    QVERIFY(writes.next());
+    QCOMPARE(writes.value(0).toInt(), writesBefore);
+    writes.finish();
+    QVERIFY(model.setProperty("showCompleted", false));
+    model.loadSearchResults(db.searchTasks("Filter"));
+    QCOMPARE(model.rowCount(), 4);
+    model.refresh();
+    QCOMPARE(model.rowCount(), 4);
+    for (int id : tasks) QVERIFY(db.archiveTask(id));
+    model.loadTasks(product, TaskStatus::Archived);
+    QCOMPARE(model.rowCount(), 4);
+    for (int id : tasks) QVERIFY(db.deleteTask(id));
+    model.loadDeletedTasks();
+    QCOMPARE(model.rowCount(), 4);
+}
+
+void NexusCoreTests::filteredTaskReorderPreservesHiddenSlots()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Reorder filter");
+    QList<int> ids;
+    for (int i = 0; i < 5; ++i) ids.append(db.addTask(product, QString::number(i)));
+    QVERIFY(db.reorderTasks(ids));
+    QVERIFY(db.updateTaskWorkStatus(ids[1], TaskWorkStatus::Completed));
+    QVERIFY(db.updateTaskWorkStatus(ids[3], TaskWorkStatus::Completed));
+    TaskListModel model;
+    model.loadTasks(product);
+    QVERIFY(model.setProperty("showCompleted", false));
+    QCOMPARE(model.rowCount(), 3);
+    QVERIFY(model.moveRows({}, 2, 1, {}, 0));
+    QList<int> actual;
+    for (const auto &task : db.getTasksForProduct(product)) actual.append(task.id);
+    QCOMPARE(actual, QList<int>({ids[4], ids[1], ids[0], ids[3], ids[2]}));
+}
+
+void NexusCoreTests::filteredSearchReorderPreservesOtherGroups()
+{
+    auto &db = DatabaseManager::instance();
+    const int product = db.addProduct("Search source");
+    const int other = db.addProduct("Other product");
+    const int first = db.addTask(product, "First");
+    const int hidden = db.addTask(product, "Hidden");
+    const int last = db.addTask(product, "Last");
+    const int otherTask = db.addTask(other, "Other");
+    const int archived = db.addTask(product, "Archived");
+    QVERIFY(db.archiveTask(archived));
+    QVERIFY(db.reorderTasks({first, hidden, last}));
+    QVERIFY(db.updateTaskWorkStatus(hidden, TaskWorkStatus::Completed));
+    const int otherOrder = db.getTask(otherTask).sortOrder;
+    const int archivedOrder = db.getTask(archived).sortOrder;
+    TaskListModel model;
+    model.loadSearchResults({db.getTask(first), db.getTask(otherTask), db.getTask(hidden),
+                             db.getTask(archived), db.getTask(last)});
+    QVERIFY(model.setProperty("showCompleted", false));
+    QVERIFY(model.moveRows({}, model.rowForTaskId(last), 1, {}, 0));
+    QList<int> actual;
+    for (const auto &task : db.getTasksForProduct(product)) actual.append(task.id);
+    QCOMPARE(actual, QList<int>({last, hidden, first}));
+    QCOMPARE(db.getTask(otherTask).sortOrder, otherOrder);
+    QCOMPARE(db.getTask(archived).sortOrder, archivedOrder);
+    QCOMPARE(model.visibleTaskCount(), 4);
+    QCOMPARE(model.taskIdAt(0), last);
+    QCOMPARE(model.taskIdAt(1), otherTask);
+    QCOMPARE(model.taskIdAt(2), archived);
+    QCOMPARE(model.taskIdAt(3), first);
+}
 
 void NexusCoreTests::initTestCase()
 {

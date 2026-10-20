@@ -7,7 +7,11 @@
 #include <QLabel>
 #include <QTimer>
 #include <QString>
+#include <functional>
+#include <utility>
 #include "models/TaskListModel.h"
+
+class QCheckBox;
 
 class TaskPane : public QWidget
 {
@@ -29,12 +33,16 @@ public:
     void restoreView(int productId, ViewMode mode, int selectedTaskId);
     ViewMode viewMode() const;
     int selectedTaskId() const;
+    void clearSelection();
     bool revealSubTask(int subtaskId, bool followParent);
+    void setBeforeHideCallback(std::function<bool(int, int)> callback) { m_beforeHide = std::move(callback); }
 
 signals:
     void taskSelected(int taskId);
     void subTaskSelected(int subTaskId);
     void subTaskMoveRequested(int subtaskId, int destinationTaskId, int position);
+    void completedItemsHidden(int taskId, int subtaskId);
+    void viewMessage(const QString &message);
 
 private slots:
     void onTaskClicked(const QModelIndex &index);
@@ -51,6 +59,9 @@ private:
     void setupContextMenu();
     void updateFilterButtonStyles();
     void refreshCurrentList();
+    void setShowCompleted(bool show);
+    void updateCompletionFeedback();
+    void applyWorkStatus(int id, bool subtask, TaskWorkStatus status);
     void showPriorityPopup(const QModelIndex &index, const QPoint &globalPos);
     void showWorkStatusPopup(const QModelIndex &index, const QPoint &globalPos);
     void showSubTaskStatusPopup(int subtaskId, int currentStatus, const QPoint &globalPos);
@@ -60,6 +71,11 @@ private:
 
     QListView *m_listView;
     TaskListModel *m_model;
+    QCheckBox *m_showCompleted;
+    QLabel *m_completionEmptyLabel;
+    std::function<bool(int, int)> m_beforeHide;
+    int m_resetTaskId = -1;
+    int m_resetSubtaskId = -1;
     QPushButton *m_addButton;
     QLabel *m_titleLabel;
     QPushButton *m_activeButton;
