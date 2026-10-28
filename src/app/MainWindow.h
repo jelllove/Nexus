@@ -17,6 +17,8 @@
 class UpdateService;
 class MarkdownPreviewDialog;
 class QProgressDialog;
+class QPushButton;
+class WindowTitleBar;
 
 class MainWindow : public QMainWindow
 {
@@ -28,6 +30,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private slots:
     void onProductSelected(int productId);
@@ -73,7 +76,9 @@ private:
     void setupMenuBar();
     void setupUpdates();
     void toggleVisibility();
-    void checkForUpdates();
+    void refreshUpdateButton();
+    void checkForUpdates(bool useDetectedUpdate = false);
+    void startUpdateDownload(const QString &downloadUrl);
     void closeDownloadProgress();
     void showUpdateFailure(const QString &title, const QString &message);
     bool prepareMarkdownPayload(PreparedMarkdownPayload &payload, const QString &actionName);
@@ -97,6 +102,8 @@ private:
     TaskPane *m_taskPane;
     EditorPane *m_editorPane;
     SearchBar *m_searchBar;
+    QPushButton *m_updateButton;
+    WindowTitleBar *m_titleBar = nullptr;
 
     // System tray
     QSystemTrayIcon *m_trayIcon;
@@ -110,6 +117,8 @@ private:
     QPointer<MarkdownPreviewDialog> m_markdownPreviewDialog;
     UpdateService *m_updateService;
     QPointer<QProgressDialog> m_downloadProgress;
+    QString m_availableUpdateVersion;
+    QString m_availableUpdateUrl;
     QString m_pendingInstallerPath;
     bool m_updatePromptOpen = false;
 };

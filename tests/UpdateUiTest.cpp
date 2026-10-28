@@ -25,9 +25,14 @@
 #include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QToolButton>
 #include <QtTest>
 #include <limits>
 #include <memory>
+
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 class TestUrlHandler : public QObject
 {
@@ -170,6 +175,11 @@ class UpdateUiTest : public QObject
     QProgressDialog *downloadDialog() const
     {
         return m_window->findChild<QProgressDialog *>("updateDownloadProgress");
+    }
+
+    QPushButton *updateButton() const
+    {
+        return m_window->findChild<QPushButton *>("updateButton");
     }
 
     void answerDialogs(const QStringList &answers)
@@ -426,6 +436,416 @@ private slots:
         bridge->setHoveredLink("https://example.com/reload");
         emit view->page()->loadStarted();
         QVERIFY(bar->currentMessage().isEmpty());
+    }
+
+    void updateButtonIsHiddenUntilAnUpdateIsAvailable()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        QVERIFY(button->isHidden());
+        triggerManualCheck();
+        m_network->reply->finish(releaseData("v1.0.7"));
+        QVERIFY(button->isHidden());
+        QCOMPARE(m_network->requests.size(), 1);
+    }
+
+    void updateButtonSurvivesDeferral_data()
+    {
+        QTest::addColumn<bool>("manual");
+        QTest::addColumn<bool>("snoozed");
+        QTest::newRow("manual-not-now") << true << false;
+        QTest::newRow("automatic-not-now") << false << false;
+        QTest::newRow("automatic-snoozed") << false << true;
+    }
+
+    void updateButtonSurvivesDeferral()
+    {
+        QFETCH(bool, manual);
+        QFETCH(bool, snoozed);
+        auto *button = updateButton();
+        QVERIFY(button);
+        if (snoozed) {
+            DatabaseManager::instance().setSetting("update_reminder_after",
+                QDateTime::currentDateTimeUtc().addMonths(1).toString(Qt::ISODateWithMs));
+        }
+        answerUpdate(false);
+        checkRelease(manual);
+        QCOMPARE(m_updateAnswers, snoozed ? 0 : 1);
+        QVERIFY(!button->isHidden());
+        QVERIFY(button->isEnabled());
+        QCOMPARE(button->text(), QString("Update"));
+        QVERIFY(button->toolTip().contains("v1.0.8"));
+        QVERIFY(!button->accessibleName().isEmpty());
+        QCOMPARE(m_network->requests.size(), 1);
+        QVERIFY(!downloadDialog());
+        QVERIFY(m_window->isHidden());
+    }
+
+    void updateButtonAppearsAtTopRight()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(false);
+        checkRelease(true);
+        m_window->show();
+        QCoreApplication::processEvents();
+        auto *search = m_window->findChild<SearchBar *>();
+        QVERIFY(search);
+        QVERIFY(button->isVisible());
+        const QPoint position = button->mapTo(m_window.get(), QPoint());
+#ifdef Q_OS_WIN
+        auto *minimize = m_window->findChild<QToolButton *>("windowMinimizeButton");
+        QVERIFY(minimize);
+        const QPoint minimizePosition = minimize->mapTo(m_window.get(), QPoint());
+        QVERIFY(position.x() + button->width() <= minimizePosition.x());
+        QVERIFY(qAbs(position.y() + button->height() / 2
+                     - minimizePosition.y() - minimize->height() / 2) <= 1);
+        QVERIFY(position.y() + button->height() <= search->mapTo(m_window.get(), QPoint()).y());
+#else
+        const QPoint searchPosition = search->mapTo(m_window.get(), QPoint());
+        QVERIFY(position.x() >= searchPosition.x() + search->width());
+        QVERIFY(m_window->width() - position.x() - button->width() <= 24);
+        QVERIFY(position.y() >= searchPosition.y());
+        QVERIFY(position.y() + button->height() <= searchPosition.y() + search->height());
+#endif
+        captureDialog(m_window.get(), "update-button-available.png");
+    }
+
+    void windowCaptionControlsMinimizeMaximizeAndRestore()
+    {
+#ifdef Q_OS_WIN
+        auto *caption = m_window->findChild<QWidget *>("windowTitleBar");
+        auto *minimize = m_window->findChild<QToolButton *>("windowMinimizeButton");
+        auto *maximize = m_window->findChild<QToolButton *>("windowMaximizeButton");
+        auto *close = m_window->findChild<QToolButton *>("windowCloseButton");
+        QVERIFY(caption);
+        QVERIFY(minimize);
+        QVERIFY(maximize);
+        QVERIFY(close);
+        QVERIFY(m_window->windowFlags().testFlag(Qt::FramelessWindowHint));
+        m_window->show();
+        maximize->click();
+        QTRY_VERIFY(m_window->isMaximized());
+        QCOMPARE(maximize->toolTip(), QString("Restore"));
+        maximize->click();
+        QTRY_VERIFY(!m_window->isMaximized());
+        QCOMPARE(maximize->toolTip(), QString("Maximize"));
+        minimize->click();
+        QTRY_VERIFY(m_window->isMinimized());
+        m_window->showNormal();
+        QTRY_VERIFY(!m_window->isMinimized());
+        QVERIFY(caption->isVisible());
+#else
+        QSKIP("Other platforms retain their native window captions.");
+#endif
+    }
+
+    void windowCaptionTracksTitleAndDoubleClick()
+    {
+#ifdef Q_OS_WIN
+        auto *caption = m_window->findChild<QWidget *>("windowTitleBar");
+        auto *title = m_window->findChild<QLabel *>("windowTitleLabel");
+        QVERIFY(caption);
+        QVERIFY(title);
+        m_window->setWindowTitle("Nexus <preview> & title");
+        QCOMPARE(title->text(), m_window->windowTitle());
+        QCOMPARE(title->textFormat(), Qt::PlainText);
+        m_window->show();
+        QTest::mouseDClick(caption, Qt::LeftButton);
+        QTRY_VERIFY(m_window->isMaximized());
+        QTest::mouseDClick(caption, Qt::LeftButton);
+        QTRY_VERIFY(!m_window->isMaximized());
+#else
+        QSKIP("Other platforms retain their native window captions.");
+#endif
+    }
+
+    void nativeWindowCaptionHitTestsAndMaximize()
+    {
+#ifdef Q_OS_WIN
+        auto *caption = m_window->findChild<QWidget *>("windowTitleBar");
+        auto *maximize = m_window->findChild<QToolButton *>("windowMaximizeButton");
+        auto *title = m_window->findChild<QLabel *>("windowTitleLabel");
+        QVERIFY(caption);
+        QVERIFY(maximize);
+        QVERIFY(title);
+        if (QGuiApplication::platformName() != "windows")
+            QSKIP("Native hit testing requires the Windows desktop plugin.");
+        answerUpdate(false);
+        checkRelease(true);
+        m_window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(m_window.get()));
+        const auto handle = reinterpret_cast<HWND>(m_window->winId());
+        const LONG_PTR style = GetWindowLongPtr(handle, GWL_STYLE);
+        QVERIFY(style & WS_THICKFRAME);
+        QVERIFY(style & WS_SYSMENU);
+        QVERIFY(style & WS_MAXIMIZEBOX);
+        POINT origin{};
+        QVERIFY(ClientToScreen(handle, &origin));
+        const qreal scale = m_window->devicePixelRatioF();
+        auto screenPoint = [&](QWidget *widget) {
+            const QPoint position = widget->mapTo(m_window.get(), widget->rect().center());
+            return QPoint(origin.x + qRound(position.x() * scale),
+                          origin.y + qRound(position.y() * scale));
+        };
+        auto hitTest = [&](const QPoint &point) {
+            return SendMessage(handle, WM_NCHITTEST, 0, MAKELPARAM(point.x(), point.y()));
+        };
+        QCOMPARE(hitTest(screenPoint(updateButton())), LRESULT(HTCLIENT));
+        QCOMPARE(hitTest(screenPoint(maximize)), LRESULT(HTMAXBUTTON));
+        QCOMPARE(hitTest(screenPoint(title)), LRESULT(HTCAPTION));
+        RECT bounds{};
+        QVERIFY(GetWindowRect(handle, &bounds));
+        const int centerX = (bounds.left + bounds.right) / 2;
+        const int centerY = (bounds.top + bounds.bottom) / 2;
+        QCOMPARE(hitTest(QPoint(bounds.left + 1, centerY)), LRESULT(HTLEFT));
+        QCOMPARE(hitTest(QPoint(bounds.right - 2, centerY)), LRESULT(HTRIGHT));
+        QCOMPARE(hitTest(QPoint(centerX, bounds.top + 1)), LRESULT(HTTOP));
+        QCOMPARE(hitTest(QPoint(centerX, bounds.bottom - 2)), LRESULT(HTBOTTOM));
+        QCOMPARE(hitTest(QPoint(bounds.left + 1, bounds.top + 1)), LRESULT(HTTOPLEFT));
+        QCOMPARE(hitTest(QPoint(bounds.right - 2, bounds.top + 1)), LRESULT(HTTOPRIGHT));
+        QCOMPARE(hitTest(QPoint(bounds.left + 1, bounds.bottom - 2)), LRESULT(HTBOTTOMLEFT));
+        QCOMPARE(hitTest(QPoint(bounds.right - 2, bounds.bottom - 2)), LRESULT(HTBOTTOMRIGHT));
+        const QPoint maximizePoint = screenPoint(maximize);
+        SendMessage(handle, WM_NCLBUTTONDOWN, HTMAXBUTTON,
+                    MAKELPARAM(maximizePoint.x(), maximizePoint.y()));
+        SendMessage(handle, WM_NCLBUTTONUP, HTMAXBUTTON,
+                    MAKELPARAM(maximizePoint.x(), maximizePoint.y()));
+        QTRY_VERIFY(m_window->isMaximized());
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        QVERIFY(GetMonitorInfo(MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST), &monitor));
+        QVERIFY(GetWindowRect(handle, &bounds));
+        QVERIFY(bounds.left >= monitor.rcWork.left);
+        QVERIFY(bounds.top >= monitor.rcWork.top);
+        QVERIFY(bounds.right <= monitor.rcWork.right);
+        QVERIFY(bounds.bottom <= monitor.rcWork.bottom);
+        SendMessage(handle, WM_SYSCOMMAND, SC_RESTORE, 0);
+        QTRY_VERIFY(!m_window->isMaximized());
+        SendMessage(handle, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+        QTRY_VERIFY(m_window->isMinimized());
+        SendMessage(handle, WM_SYSCOMMAND, SC_RESTORE, 0);
+        QTRY_VERIFY(!m_window->isMinimized());
+        QVERIFY(!m_window->isMaximized());
+        SendMessage(handle, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+        QTRY_VERIFY(m_window->isMaximized());
+        SendMessage(handle, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+        QTRY_VERIFY(m_window->isMinimized());
+        SendMessage(handle, WM_SYSCOMMAND, SC_RESTORE, 0);
+        QTRY_VERIFY(!m_window->isMinimized());
+        QVERIFY(m_window->isMaximized());
+        SendMessage(handle, WM_SYSCOMMAND, SC_RESTORE, 0);
+        QTRY_VERIFY(!m_window->isMaximized());
+#else
+        QSKIP("Native caption hit testing is Windows-specific.");
+#endif
+    }
+
+    void updateButtonStartsDownloadWithoutAnotherPrompt()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(false, 1);
+        checkRelease(true);
+        QVERIFY(!DatabaseManager::instance().getSetting("update_reminder_after").isEmpty());
+        button->click();
+        QCOMPARE(m_updateAnswers, 1);
+        QCOMPARE(m_network->requests.size(), 2);
+        QCOMPARE(m_network->requests.last().url(), QUrl(installerUrl()));
+        QVERIFY(DatabaseManager::instance().getSetting("update_reminder_after").isEmpty());
+        QVERIFY(downloadDialog());
+        QVERIFY(downloadDialog()->isVisible());
+    }
+
+    void updateButtonTracksDownloadAndAllowsRetryAfterCancel()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(true);
+        checkRelease(true);
+        QVERIFY(!button->isEnabled());
+        QVERIFY(button->text().contains("Downloading"));
+        emit m_network->reply->downloadProgress(1024, 4096);
+        QVERIFY(button->text().contains("25%"));
+        button->click();
+        triggerManualCheck();
+        QCOMPARE(m_network->requests.size(), 2);
+        emit m_network->reply->downloadProgress(2048, -1);
+        QVERIFY(!button->text().contains("25%"));
+        downloadDialog()->close();
+        QVERIFY(button->isEnabled());
+        QCOMPARE(button->text(), QString("Update"));
+        QVERIFY(!button->isHidden());
+        button->click();
+        QCOMPARE(m_network->requests.size(), 3);
+        QCOMPARE(m_network->requests.last().url(), QUrl(installerUrl()));
+        QVERIFY(downloadDialog());
+    }
+
+    void updateButtonRetriesFailedDownload_data()
+    {
+        QTest::addColumn<bool>("networkFailure");
+        QTest::newRow("network-error") << true;
+        QTest::newRow("empty-installer") << false;
+    }
+
+    void updateButtonRetriesFailedDownload()
+    {
+        QFETCH(bool, networkFailure);
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(true);
+        checkRelease(true);
+        QTest::ignoreMessage(QtWarningMsg, networkFailure
+            ? "Update: Download failed: simulated failure" : "Update: Downloaded installer is empty");
+        answerDialogs({"OK"});
+        m_network->reply->finish({}, networkFailure
+            ? QNetworkReply::TimeoutError : QNetworkReply::NoError);
+        QVERIFY(button->isEnabled());
+        QVERIFY(!button->isHidden());
+        QCOMPARE(button->text(), QString("Update"));
+        button->click();
+        QCOMPARE(m_network->requests.size(), 3);
+        QCOMPARE(m_network->requests.last().url(), QUrl(installerUrl()));
+        QVERIFY(downloadDialog());
+    }
+
+    void updateButtonReopensDownloadedUpdate()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(true);
+        checkRelease(true);
+        answerDialogs({"Later"});
+        m_network->reply->finish("test installer - never executed");
+        QVERIFY(button->isEnabled());
+        QVERIFY(!button->isHidden());
+        QCOMPARE(button->text(), updateButtonText());
+        answerDialogs({"Later"});
+        button->click();
+        QCOMPARE(m_network->requests.size(), 2);
+        QCOMPARE(m_downloads.size(), 1);
+        QVERIFY(!m_updater->isBusy());
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(!downloadDialog());
+    }
+
+    void updateButtonRedownloadsMissingInstaller()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(true);
+        checkRelease(true);
+        answerDialogs({"Later"});
+        m_network->reply->finish("test installer - never executed");
+        QCOMPARE(m_downloads.size(), 1);
+        QVERIFY(QFile::remove(m_downloads.first()));
+        button->click();
+        QCOMPARE(m_network->requests.size(), 3);
+        QCOMPARE(m_network->requests.last().url(), QUrl(installerUrl()));
+        QVERIFY(downloadDialog());
+    }
+
+    void updateButtonUsesNewestDetectedRelease()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(true);
+        checkRelease(true);
+        answerDialogs({"Later"});
+        m_network->reply->finish("test installer - never executed");
+        DatabaseManager::instance().setSetting("update_reminder_after",
+            QDateTime::currentDateTimeUtc().addMonths(1).toString(Qt::ISODateWithMs));
+        checkRelease(false, "v1.0.9");
+        QCOMPARE(m_updateAnswers, 1);
+        QCOMPARE(button->text(), QString("Update"));
+        QVERIFY(button->toolTip().contains("v1.0.9"));
+        button->click();
+        QCOMPARE(m_network->requests.size(), 4);
+        QCOMPARE(m_network->requests.last().url(), QUrl(installerUrl("v1.0.9")));
+        QVERIFY(downloadDialog());
+    }
+
+    void updateButtonDoesNotOverlapAnUpdateCheck()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(false);
+        checkRelease(true);
+        triggerManualCheck();
+        QCOMPARE(m_network->requests.size(), 2);
+        button->click();
+        QCOMPARE(m_network->requests.size(), 2);
+        QVERIFY(!downloadDialog());
+        QVERIFY(m_window->statusBar()->currentMessage().contains("already in progress"));
+        answerUpdate(false);
+        checkRelease(true, "v1.0.9");
+        button->click();
+        QCOMPARE(m_network->requests.size(), 3);
+        QCOMPARE(m_network->requests.last().url(), QUrl(installerUrl("v1.0.9")));
+    }
+
+    void updateButtonHidesWhenCheckReportsUpToDate()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(false);
+        checkRelease(true);
+        QVERIFY(!button->isHidden());
+        triggerManualCheck();
+        m_network->reply->finish(releaseData("v1.0.7"));
+        QVERIFY(button->isHidden());
+        QVERIFY(!downloadDialog());
+        QCOMPARE(m_network->requests.size(), 2);
+    }
+
+    void updateButtonReportsReminderSaveFailure()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(false);
+        checkRelease(true);
+        const QString saved = DatabaseManager::instance().getSetting("update_reminder_after");
+        QSqlQuery query;
+        QVERIFY(query.exec("PRAGMA query_only=ON"));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("^Failed to save setting"));
+        answerDialogs({"OK"});
+        button->click();
+        QCOMPARE(m_network->requests.size(), 1);
+        QVERIFY(!downloadDialog());
+        QVERIFY(button->isEnabled());
+        QCOMPARE(DatabaseManager::instance().getSetting("update_reminder_after"), saved);
+        QVERIFY(query.exec("PRAGMA query_only=OFF"));
+        button->click();
+        QCOMPARE(m_network->requests.size(), 2);
+        QVERIFY(downloadDialog());
+    }
+
+    void updateButtonPreservesSaveBeforeInstallProtection()
+    {
+        auto *button = updateButton();
+        QVERIFY(button);
+        answerUpdate(true);
+        checkRelease(true);
+        answerDialogs({"Later"});
+        m_network->reply->finish("test installer - never executed");
+        auto *editor = m_window->findChild<EditorPane *>();
+        editor->loadSubTask(m_subtaskId);
+        editor->findChild<EditorBridge *>()->setContent("<p>Unsaved button update edit</p>");
+        QSqlQuery query;
+        QVERIFY(query.exec("PRAGMA query_only=ON"));
+        QSignalSpy quitting(qApp, &QCoreApplication::aboutToQuit);
+        QTest::ignoreMessage(QtWarningMsg, qPrintable(
+            QString("Failed to save subtask content: %1").arg(m_subtaskId)));
+        answerDialogs({updateButtonText(), "OK"});
+        button->click();
+        QCOMPARE(quitting.count(), 0);
+        QCOMPARE(m_network->requests.size(), 2);
+        QVERIFY(button->isEnabled());
+        QVERIFY(m_downloadPageHandler.requests.isEmpty());
+        QVERIFY(query.exec("PRAGMA query_only=OFF"));
+        QVERIFY(editor->saveCurrentContent());
+        QCOMPARE(DatabaseManager::instance().getSubtask(m_subtaskId).content,
+                 QString("<p>Unsaved button update edit</p>"));
     }
 
     void deferringNeverDownloadsAndPersistsDeadline_data()

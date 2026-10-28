@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Nexus VERSION 1.0.16 LANGUAGES CXX)
+project(Nexus VERSION 1.0.17 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -60,6 +60,7 @@ set(SOURCES
     src/ui/ActivitySummaryDialog.cpp
     src/ui/EditorPane.cpp
     src/ui/SearchBar.cpp
+    src/ui/WindowTitleBar.cpp
     src/ui/SettingsDialog.cpp
     src/editor/EditorBridge.cpp
     src/services/AIService.cpp
@@ -87,6 +88,7 @@ set(HEADERS
     src/ui/ActivitySummaryDialog.h
     src/ui/EditorPane.h
     src/ui/SearchBar.h
+    src/ui/WindowTitleBar.h
     src/ui/SettingsDialog.h
     src/editor/EditorBridge.h
     src/services/AIService.h

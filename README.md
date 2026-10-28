@@ -18,18 +18,18 @@ synchronization copies the same verified commit and assets when requested;
 the mirror can lag behind the primary release.
 The previous `qinqingxu/Nexus` address redirects to this renamed mirror.
 
-### v1.0.16 packages
+### v1.0.17 packages
 
-**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.16/Nexus-Setup-v1.0.16-x64.exe)**
+**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.17/Nexus-Setup-v1.0.17-x64.exe)**
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.16-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.16-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.16-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.16-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.16-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.16-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.16-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.16-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.17-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.17-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.17-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.17-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.17-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.17-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.17-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.17-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -38,9 +38,11 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.16 release notes](docs/release-notes-v1.0.16.md).
-This release adds **Show completed** in the Tasks pane, with remembered
-visibility, safe note saving and filtering across products and search results.
+notes, not personal data. See [v1.0.17 release notes](docs/release-notes-v1.0.17.md).
+This release adds a persistent **Update** action after a new release is detected.
+On Windows it sits in the title bar beside the minimize/maximize/close controls;
+macOS/Linux keep it beside the search bar. Downloads show progress and support
+retrying or reopening a cached update, with save-before-install protection.
 Earlier releases and their assets remain unchanged.
 
 ### Linux package-manager installation
@@ -51,9 +53,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.16-Linux-x64.deb
+sudo apt install ./Nexus-1.0.17-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.16-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.17-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -452,17 +454,17 @@ Before trying a new local build, allow pending edits to autosave, then use
 ## Update checks
 
 - **Settings > Updates** controls automatic startup and six-hour checks; changes take effect immediately.
-- A new release opens **Update Available** with **Yes** and **Not now**. Downloads only start after **Yes**, including for users who previously enabled automatic downloading; that old setting is no longer used.
+- A new release shows a blue **Update** button at the top-right of the window and opens **Update Available** with **Yes** and **Not now**. On Windows the button is in the title bar, immediately before the minimize/maximize/close controls; macOS/Linux retain the button beside the search bar and their native window frames. The button is hidden until an update is detected. Downloads only start after **Yes** or an explicit click on **Update**, including for users who previously enabled automatic downloading; that old setting is no longer used.
 - **Not now**, Escape, or closing the prompt postpones reminders for six hours by default. Select **Don't ask for 1/2/3 months** before choosing **Not now** to pause automatic prompts for that many calendar months (clamped to the last day for shorter months).
-- The UTC reminder deadline is saved in the current database and survives restarts. It covers all release versions; background checks continue during the pause. After expiry, the next scheduled check can remind you again.
-- **Help > Check for Updates** bypasses paused reminders and disabled automatic checks. Choosing **Not now** with the default six-hour option does not shorten an existing longer pause; choosing **Yes** clears it. Settings displays the pause deadline in local time.
-- **Yes** opens a download dialog showing percentage and downloaded/total size. If the server does not report a total, progress is indeterminate with the received size. **Cancel** or closing the download window aborts the download without starting an installer, and manual checks can retry.
+- The UTC reminder deadline is saved in the current database and survives restarts. It covers all release versions; background checks continue during the pause. Pauses suppress popups, not the **Update** button, which remains available for releases detected during this session. After expiry, the next scheduled check can remind you again.
+- **Help > Check for Updates** bypasses paused reminders and disabled automatic checks. Choosing **Not now** with the default six-hour option does not shorten an existing longer pause; choosing **Yes** or clicking **Update** clears it. Clicking **Update** downloads the detected release directly without repeating the availability prompt. Settings displays the pause deadline in local time.
+- **Yes** or **Update** opens a download dialog showing percentage and downloaded/total size. The top-right button also shows progress and is disabled during the download to prevent duplicate requests. If the server does not report a total, progress is indeterminate with the received size. **Cancel** or closing the download window aborts the download without starting an installer; the **Update** button becomes available again for retries, including after download failures.
 - Checks and downloads cannot overlap. Background errors are logged and shown in the status bar, not an error popup; the next scheduled check can retry.
 - Download failures close the progress dialog and show an error. No partial installer is launched.
 - Download/save failures and failures to launch/open a downloaded package automatically open the [official Nexus download page](https://www.jelllove.com/products/nexus.html) for manual installation. Nexus stays open; the error dialog includes a selectable download URL and explains if the browser could not be opened.
 - Cancelling or deferring an update, background check errors and note-save failures do not open the download page. Nexus detects download and package-launch failures, not failures inside an external installer after it has successfully started.
 - After download, Windows **Install now** saves the current task or subtask before launching the installer and quitting. On macOS/Linux, **Open update** saves the note, opens the DMG/folder, and keeps Nexus running. Quit Nexus before manually installing the replacement. Save/open failures leave Nexus open.
-- Choose **Later** to keep working; use **Help > Check for Updates** to reopen the downloaded update without downloading it again during the same session.
+- Choose **Later** to keep working; the top-right button changes to **Install now** on Windows or **Open update** on macOS/Linux. Use it or **Help > Check for Updates** to reopen the downloaded update without downloading it again during the same session. Installation/opening still requires confirmation and saves the current note first. If the cached file is removed, clicking the button downloads it again; detecting a newer release replaces the button's older update target.
 - Checking requires Nexus to be running and the computer awake. This is not a background service; the Windows installer may require UAC confirmation.
 
 ### Windows installer launch troubleshooting
@@ -494,6 +496,11 @@ not publish a release until all tag-build, editor and native installer checks pa
 ## Desktop integration
 
 The global shortcut is **Control+Shift+N**, including on macOS (not Command).
+Windows uses a client-drawn title bar to place the update action beside the
+window controls. Drag its title area to move the window, double-click to
+maximize/restore, or use the window controls normally. Native resize edges,
+system-menu hit testing and the Windows maximize/snap hit target are retained;
+maximized windows respect the monitor work area rather than covering the taskbar.
 On Wayland, Settings explains the limitation; use your desktop's shortcut
 settings to launch Nexus, which asks an already-running instance to show itself.
 When no tray is available, closing saves the active note and exits rather than
@@ -510,7 +517,8 @@ and `build/SubtaskMoveTest.txt`, plus `build/UpdatePackageTest.txt`; test execut
 `build/tests`. Update tests use a fake network (no GitHub access or real installers)
 and a temporary database to verify the exact six-hour interval, persistent
 1/2/3-month pauses, expiry/manual overrides, required download consent, progress,
-cancellation, error handling, cached downloads and save-before-install protection.
+cancellation, error handling, cached downloads, top-right update-button visibility,
+direct-download/retry behavior and save-before-install protection.
 The subtask suite uses an isolated temporary database and covers
 ordering, reparenting, field preservation, rollback, the destination picker,
 mouse dragging, drop indicators, cancellation, edge scrolling, editor saves
@@ -602,11 +610,11 @@ Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/release-v1.0.16
+git push origin agents/release-v1.0.17
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.16 -m "Nexus v1.0.16"
-git push origin v1.0.16
+git tag -a v1.0.17 -m "Nexus v1.0.17"
+git push origin v1.0.17
 ```
 
 The tag workflow checks editor syntax and bundle reproducibility, runs all ten
