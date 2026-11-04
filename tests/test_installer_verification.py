@@ -19,6 +19,67 @@ class InstallerVerificationTest(unittest.TestCase):
         cls.module = importlib.util.module_from_spec(SPEC)
         SPEC.loader.exec_module(cls.module)
 
+    def create_qt_sdk(self, root):
+        sdk = root / "development-qt"
+        config = sdk / "lib" / "cmake" / "Qt6Core" / "Qt6CoreConfig.cmake"
+        config.parent.mkdir(parents=True)
+        config.write_text("synthetic Qt SDK", encoding="utf-8")
+        return sdk
+
+    def sdk_isolation(self, sdk):
+        isolate = getattr(self.module, "isolated_qt_sdk", None)
+        self.assertTrue(callable(isolate), "Native verification must physically isolate the developer Qt SDK.")
+        return isolate(sdk)
+
+    def test_qt_sdk_is_unavailable_during_verification_and_restored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdk = self.create_qt_sdk(root)
+            with self.sdk_isolation(sdk):
+                self.assertFalse(sdk.exists())
+            config = sdk / "lib" / "cmake" / "Qt6Core" / "Qt6CoreConfig.cmake"
+            self.assertEqual(config.read_text(encoding="utf-8"), "synthetic Qt SDK")
+            self.assertEqual(list(root.glob(".nexus-sdk-isolation-*")), [])
+
+    def test_qt_sdk_is_restored_after_verification_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdk = self.create_qt_sdk(root)
+            with self.assertRaisesRegex(RuntimeError, "synthetic verification failure"):
+                with self.sdk_isolation(sdk):
+                    self.assertFalse(sdk.exists())
+                    raise RuntimeError("synthetic verification failure")
+            self.assertTrue((sdk / "lib" / "cmake" / "Qt6Core" / "Qt6CoreConfig.cmake").is_file())
+            self.assertEqual(list(root.glob(".nexus-sdk-isolation-*")), [])
+
+    def test_non_sdk_directory_is_not_moved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unrelated = root / "not-a-sdk"
+            unrelated.mkdir()
+            marker = unrelated / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Qt SDK"):
+                with self.sdk_isolation(unrelated):
+                    self.fail("A non-SDK directory must never be isolated.")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+            self.assertEqual(list(root.glob(".nexus-sdk-isolation-*")), [])
+
+    def test_restore_collision_preserves_both_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdk = self.create_qt_sdk(root)
+            with self.assertRaisesRegex(ValueError, "preserved"):
+                with self.sdk_isolation(sdk):
+                    sdk.mkdir()
+                    (sdk / "new-data.txt").write_text("new data", encoding="utf-8")
+            self.assertEqual((sdk / "new-data.txt").read_text(encoding="utf-8"), "new data")
+            preserved = list(root.glob(
+                ".nexus-sdk-isolation-*/qt-sdk/lib/cmake/Qt6Core/Qt6CoreConfig.cmake"
+            ))
+            self.assertEqual(len(preserved), 1)
+            self.assertEqual(preserved[0].read_text(encoding="utf-8"), "synthetic Qt SDK")
+
     def test_environment_removes_development_qt_overrides(self):
         env = self.module.clean_environment({
             "PATH": "/opt/Qt/bin:/usr/bin",

@@ -39,6 +39,8 @@ def prepare_release(source, output, tag):
         report = json.loads((evidence / "verification.json").read_text())
         if report.get("status") != "passed":
             raise ValueError(f"{system} installed-package verification did not pass.")
+        if system == "macOS" and report.get("developerQtExcluded") is not True:
+            raise ValueError("macOS verification did not exclude the developer Qt SDK.")
         if system not in ("macOS", "Linux"):
             for key in ("packageInstalled", "packageReinstalled", "packageRemoved",
                         "userDataPreserved", "systemIntegration"):

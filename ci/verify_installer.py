@@ -1,6 +1,7 @@
 """Verify installed Nexus packages and collect GUI evidence on native CI hosts."""
 
 import argparse
+from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,31 @@ import sys
 import tarfile
 import tempfile
 import zlib
+
+
+@contextmanager
+def isolated_qt_sdk(path):
+    sdk = path.resolve(strict=True)
+    if (sdk.parent == sdk or sdk in (Path.home().resolve(), Path.cwd().resolve())
+            or not (sdk / "lib" / "cmake" / "Qt6Core" / "Qt6CoreConfig.cmake").is_file()):
+        raise ValueError("Qt SDK isolation requires an explicit developer Qt SDK directory.")
+    quarantine = Path(tempfile.mkdtemp(prefix=".nexus-sdk-isolation-", dir=sdk.parent))
+    hidden = quarantine / "qt-sdk"
+    try:
+        sdk.rename(hidden)
+    except OSError:
+        quarantine.rmdir()
+        raise
+    try:
+        yield sdk
+    finally:
+        if sdk.exists() or sdk.is_symlink():
+            raise ValueError(f"Qt SDK restore destination changed; original SDK is preserved at {hidden}.")
+        try:
+            hidden.rename(sdk)
+        except OSError as error:
+            raise OSError(f"Cannot restore Qt SDK; it is preserved at {hidden}: {error}") from error
+        quarantine.rmdir()
 
 
 def clean_environment(environment, platform):
@@ -126,40 +152,50 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--isolate-qt-sdk", type=Path,
+                        help="Temporarily hide this macOS developer SDK while verifying the installed DMG.")
     args = parser.parse_args()
     system = platform.system()
     if system not in ("Darwin", "Linux"):
         parser.error("Native installer verification requires macOS or Linux.")
+    if args.isolate_qt_sdk is not None and system != "Darwin":
+        parser.error("Qt SDK isolation is supported only for native macOS DMG verification.")
     package = args.package.resolve(strict=True)
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=False)
     system_name = "macOS" if system == "Darwin" else "Linux"
-    status = {"status": "failed", "platform": system_name, "package": package.name}
+    status = {"status": "failed", "platform": system_name, "package": package.name,
+              "developerQtExcluded": False}
     try:
-        with tempfile.TemporaryDirectory(prefix="nexus-installed-") as directory:
-            root = Path(directory)
-            with (evidence / "install.log").open("wb") as log:
-                launcher, executable = (
-                    install_macos(package, root, log) if system == "Darwin"
-                    else install_linux(package, root, log)
-                )
-            env = clean_environment(os.environ, system_name)
-            if system == "Linux":
-                home = root / "home"
-                home.mkdir()
-                env.update({
-                    "HOME": str(home), "XDG_CONFIG_HOME": str(home / "config"),
-                    "XDG_DATA_HOME": str(home / "data"), "XDG_CACHE_HOME": str(home / "cache"),
-                })
-            with (evidence / "application.log").open("wb") as log:
-                subprocess.run(
-                    [str(launcher), "--installer-smoke", str(evidence / "screenshots")],
-                    cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT,
-                    check=True, timeout=90,
-                )
-            report = validate_evidence(evidence / "screenshots", executable)
-            status.update({"status": "passed", "installedExecutable": str(executable.resolve()),
-                           "verification": report})
+        isolation = (isolated_qt_sdk(args.isolate_qt_sdk)
+                     if args.isolate_qt_sdk is not None else nullcontext())
+        with isolation:
+            with tempfile.TemporaryDirectory(prefix="nexus-installed-") as directory:
+                root = Path(directory)
+                with (evidence / "install.log").open("wb") as log:
+                    launcher, executable = (
+                        install_macos(package, root, log) if system == "Darwin"
+                        else install_linux(package, root, log)
+                    )
+                env = clean_environment(os.environ, system_name)
+                if system == "Linux":
+                    home = root / "home"
+                    home.mkdir()
+                    env.update({
+                        "HOME": str(home), "XDG_CONFIG_HOME": str(home / "config"),
+                        "XDG_DATA_HOME": str(home / "data"), "XDG_CACHE_HOME": str(home / "cache"),
+                    })
+                with (evidence / "application.log").open("wb") as log:
+                    subprocess.run(
+                        [str(launcher), "--installer-smoke", str(evidence / "screenshots")],
+                        cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT,
+                        check=True, timeout=90,
+                    )
+                report = validate_evidence(evidence / "screenshots", executable)
+                installed_executable = str(executable.resolve())
+        status.update({"status": "passed", "installedExecutable": installed_executable,
+                       "verification": report,
+                       "developerQtExcluded": args.isolate_qt_sdk is not None})
     except (OSError, ValueError, plistlib.InvalidFileException,
             subprocess.SubprocessError, tarfile.TarError) as error:
         status["error"] = str(error)

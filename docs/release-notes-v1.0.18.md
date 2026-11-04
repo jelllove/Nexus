@@ -1,5 +1,9 @@
 # Nexus v1.0.18
 
+This version was tagged but not published because GitHub could not allocate
+the native macOS verification runner. The tag is preserved unchanged.
+[v1.0.19](release-notes-v1.0.19.md) supersedes this staged version.
+
 ## Download and install
 
 **[Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.18/Nexus-Setup-v1.0.18-x64.exe)**

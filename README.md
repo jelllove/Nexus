@@ -18,18 +18,18 @@ synchronization copies the same verified commit and assets when requested;
 the mirror can lag behind the primary release.
 The previous `qinqingxu/Nexus` address redirects to this renamed mirror.
 
-### v1.0.18 packages
+### v1.0.19 packages
 
-**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.18/Nexus-Setup-v1.0.18-x64.exe)**
+**[Download Windows x64 installer (EXE)](https://github.com/jelllove/Nexus/releases/download/v1.0.19/Nexus-Setup-v1.0.19-x64.exe)**
 
 | Platform | Release asset | Installation |
 | --- | --- | --- |
-| Windows 10/11 x64 | `Nexus-Setup-v1.0.18-x64.exe` | Run the installer; shortcuts launch the deployed application. |
-| Windows x64 portable | `Nexus-1.0.18-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
-| macOS Apple Silicon | `Nexus-1.0.18-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
-| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.18-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.18-Linux-x64.deb` |
-| Fedora 43/44 x64 | `Nexus-1.0.18-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.18-Linux-x64.rpm` |
-| Linux x64 portable | `Nexus-1.0.18-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
+| Windows 10/11 x64 | `Nexus-Setup-v1.0.19-x64.exe` | Run the installer; shortcuts launch the deployed application. |
+| Windows x64 portable | `Nexus-1.0.19-Windows-x64.zip` | Extract the entire archive and run `Nexus.exe`. |
+| macOS Apple Silicon | `Nexus-1.0.19-macOS-arm64.dmg` | Mount the image, copy Nexus into Applications, then launch it. |
+| Ubuntu 22.04/24.04 x64 | `Nexus-1.0.19-Linux-x64.deb` | `sudo apt install ./Nexus-1.0.19-Linux-x64.deb` |
+| Fedora 43/44 x64 | `Nexus-1.0.19-Linux-x64.rpm` | `sudo dnf install ./Nexus-1.0.19-Linux-x64.rpm` |
+| Linux x64 portable | `Nexus-1.0.19-Linux-x64.tar.gz` | Extract the entire archive and run its `bin/nexus-launch`. |
 
 Do not extract only the executable: the Qt runtime and WebEngine resources are
 required. Intel macOS and Linux ARM64 can be built from source with matching Qt
@@ -38,7 +38,7 @@ are unsigned/unnotarized; Linux uses Ubuntu 22.04 as its compatibility baseline.
 
 Release downloads also include `SHA256SUMS`, native app-window/desktop PNGs,
 and macOS/Linux installer-evidence ZIPs. The screenshots show synthetic sample
-notes, not personal data. See [v1.0.18 release notes](docs/release-notes-v1.0.18.md).
+notes, not personal data. See [v1.0.19 release notes](docs/release-notes-v1.0.19.md).
 This release adds **AI Quick Task** beside the search bar and on Ctrl+Alt+N
 (Command+Option+N on macOS). Describe work once, review editable project/parent
 recommendations and optimized title/context, then explicitly create a task,
@@ -53,9 +53,9 @@ remain in your user data directory. Quit Nexus before upgrading.
 
 ```sh
 # Ubuntu 22.04/24.04 x64
-sudo apt install ./Nexus-1.0.18-Linux-x64.deb
+sudo apt install ./Nexus-1.0.19-Linux-x64.deb
 # Fedora 43/44 x64
-sudo dnf install ./Nexus-1.0.18-Linux-x64.rpm
+sudo dnf install ./Nexus-1.0.19-Linux-x64.rpm
 ```
 
 Uninstall with `sudo apt remove nexus` or `sudo dnf remove nexus`; this does not
@@ -650,11 +650,11 @@ Use a new version tag only after the branch's native build and installer
 verification jobs pass. A tag must match the CMake application version.
 
 ```sh
-git push origin agents/release-v1.0.18
+git push origin agents/release-v1.0.19
 # After the branch workflow passes:
 git push origin HEAD:main
-git tag -a v1.0.18 -m "Nexus v1.0.18"
-git push origin v1.0.18
+git tag -a v1.0.19 -m "Nexus v1.0.19"
+git push origin v1.0.19
 ```
 
 The tag workflow checks editor syntax and bundle reproducibility, runs all eleven
@@ -663,8 +663,16 @@ packages and screenshots, requires all four DEB/RPM lifecycle jobs, creates the 
 deployed runtime, and publishes a GitHub release only after these gates pass.
 Missing packages/evidence or a version mismatch block publication. Mirror
 releases reuse these verified assets rather than claiming a second validation.
-macOS builds and installed-DMG checks use pinned `macos-15` ARM64 runners and
-check the native CPU architecture. GitHub
+macOS builds and installed-DMG checks share one allocated `macos-15` ARM64
+runner, with an explicit native-architecture check. The DMG is installed into
+a clean temporary directory while the developer Qt SDK is physically moved
+out of its original location and Qt-related environment overrides are removed.
+The SDK is restored afterward, including on verification failure; restore
+collisions preserve both directories and fail the job. Release preparation
+requires `developerQtExcluded: true` in the macOS evidence, so a build-machine
+Qt installation cannot silently mask missing packaged runtime files. This
+avoids a second macOS runner allocation without skipping native verification.
+GitHub
 [retired macOS 14 runners](https://github.com/actions/runner-images/issues/15226)
 on November 2, 2026; the package architecture and verification matrix are unchanged.
 The legacy `release.bat` is Windows-only; the CI tag workflow is the

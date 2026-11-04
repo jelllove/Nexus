@@ -62,9 +62,16 @@ jobs required before release publication. The initial v1.0.9 design above remain
 the historical portable-package baseline; native packages do not replace it.
 
 The CI workflow builds, tests and packages on Windows, macOS and Ubuntu.
-Both macOS builds and installed-DMG verification use pinned `macos-15` ARM64
-runners, with explicit native-architecture checks. This replaces the retired
-macOS 14 runner without changing the macOS ARM64 package target.
+macOS builds and installed-DMG verification share the allocated `macos-15`
+ARM64 runner, with an explicit native-architecture check. After packaging, the
+verifier temporarily renames the developer Qt SDK out of its original path
+and clears Qt-related runtime environment overrides. It mounts the actual DMG,
+copies the application to a fresh temporary directory, then requires editor
+render/save and native screenshots before restoring the SDK. Failure also
+restores the SDK; a restore collision preserves data and fails verification.
+Publication requires the `developerQtExcluded` evidence flag as well as the
+existing native checks. This avoids a second macOS runner allocation without
+changing the macOS ARM64 target or dropping any of the six native environments.
 Native validation results are recorded separately from local Windows checks.
 The v1.0.11 integration adds core SQLite/model regressions and an editor
 syntax/build reproducibility job to the existing native packaging gates.

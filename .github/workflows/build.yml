@@ -126,6 +126,25 @@ jobs:
       - name: Package with Qt runtime
         run: cpack --config build/CPackConfig.cmake -C Release
 
+      - name: Verify installed macOS DMG with isolated Qt runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(build/packages/*.dmg)
+          test "${#packages[@]}" -eq 1
+          python ci/verify_installer.py --package "${packages[0]}" \
+            --evidence installer-evidence --isolate-qt-sdk "$QT_ROOT_DIR"
+
+      - name: Upload macOS installer screenshots and diagnostics
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nexus-macOS-installer-evidence
+          path: installer-evidence/
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: Package native Linux DEB and RPM
         if: runner.os == 'Linux'
         shell: bash
@@ -178,8 +197,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15
-            platform: macOS
           - os: ubuntu-22.04
             platform: Linux
     runs-on: ${{ matrix.os }}
@@ -192,11 +209,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Verify native macOS ARM64 runner
-        if: runner.os == 'macOS'
-        shell: bash
-        run: test "$(uname -m)" = arm64
 
       - name: Download native package
         uses: actions/download-artifact@v4
@@ -216,15 +228,6 @@ jobs:
             libgl1 libegl1 libopengl0 fonts-dejavu-core libxcb-icccm4 libxcb-keysyms1 \
             libxcb-image0 libxcb-render-util0 libxcb-randr0 libxcb-xfixes0 \
             libxcb-sync1 libxcb-xkb1 libxcb-shape0
-
-      - name: Verify installed macOS DMG and capture screen
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          packages=(installer-package/*.dmg)
-          test "${#packages[@]}" -eq 1
-          python ci/verify_installer.py --package "${packages[0]}" --evidence installer-evidence
 
       - name: Verify installed Linux archive and capture virtual desktop
         if: runner.os == 'Linux'

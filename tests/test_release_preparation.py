@@ -37,9 +37,16 @@ class ReleasePreparationTest(unittest.TestCase):
     def test_macos_release_jobs_use_supported_arm64_runners(self):
         workflow = (ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
         runners = re.findall(r"- os:\s*(macos-\S+)\s*\n\s*platform:\s*macOS", workflow)
-        self.assertEqual(runners, ["macos-15", "macos-15"])
+        self.assertEqual(runners, ["macos-15"])
         self.assertIn("cmake-options: '-DCMAKE_OSX_ARCHITECTURES=arm64'", workflow)
-        self.assertEqual(workflow.count('test "$(uname -m)" = arm64'), 2)
+        self.assertEqual(workflow.count('test "$(uname -m)" = arm64'), 1)
+        build = workflow.split("\n  build:", 1)[1].split("\n  verify-installer:", 1)[0]
+        native = "Verify installed macOS DMG with isolated Qt runtime"
+        self.assertIn(native, build)
+        self.assertIn('--isolate-qt-sdk "$QT_ROOT_DIR"', build)
+        self.assertIn("name: Nexus-macOS-installer-evidence", build)
+        self.assertLess(build.index("Package with Qt runtime"), build.index(native))
+        self.assertLess(build.index(native), build.index("Upload artifact"))
 
     def create_input(self, root):
         for system, packages in PACKAGE_NAMES.items():
@@ -57,7 +64,7 @@ class ReleasePreparationTest(unittest.TestCase):
                 "status": "passed", "installedExecutable": executable,
                 "packageInstalled": True, "packageReinstalled": True,
                 "packageRemoved": True, "userDataPreserved": True,
-                "systemIntegration": True,
+                "systemIntegration": True, "developerQtExcluded": system == "macOS",
             }))
             (screenshots / "report.json").write_text(json.dumps({
                 "status": "passed", "executable": executable,
@@ -127,6 +134,23 @@ class ReleasePreparationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "verification did not pass"):
                 MODULE.prepare_release(root, root / "release", "v" + VERSION)
             self.assertFalse((root / "release").exists())
+
+    def test_macos_developer_sdk_dependency_blocks_publication(self):
+        for value in (None, False):
+            with self.subTest(developerQtExcluded=value):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.create_input(root)
+                    report = root / "Nexus-macOS-installer-evidence" / "verification.json"
+                    data = json.loads(report.read_text())
+                    if value is None:
+                        data.pop("developerQtExcluded")
+                    else:
+                        data["developerQtExcluded"] = value
+                    report.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(ValueError, "developer Qt"):
+                        MODULE.prepare_release(root, root / "release", "v" + VERSION)
+                    self.assertFalse((root / "release").exists())
 
     def test_tag_version_mismatch_blocks_publication(self):
         with tempfile.TemporaryDirectory() as directory:
