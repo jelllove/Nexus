@@ -1,9 +1,12 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -34,6 +37,43 @@ def sample_png():
 
 
 class ReleasePreparationTest(unittest.TestCase):
+    def test_legacy_qt_agl_compatibility_preserves_other_links(self):
+        helper = ROOT / "cmake" / "NexusQtCompatibility.cmake"
+        self.assertTrue(helper.is_file(), "Qt's obsolete AGL fallback needs a scoped compatibility helper.")
+        cmake = os.environ.get("NEXUS_CMAKE_COMMAND") or shutil.which("cmake")
+        self.assertTrue(cmake, "Run this check through CTest or set NEXUS_CMAKE_COMMAND.")
+        cases = (
+            ("TRUE", "-framework OpenGL;-framework AGL;keep-library", "-framework OpenGL;keep-library"),
+            ("FALSE", "-framework OpenGL;-framework AGL;keep-library",
+             "-framework OpenGL;-framework AGL;keep-library"),
+            ("TRUE", "-framework OpenGL;keep-library", "-framework OpenGL;keep-library"),
+        )
+        for apple, links, expected in cases:
+            with self.subTest(apple=apple, links=links):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    (root / "CMakeLists.txt").write_text(
+                        'cmake_minimum_required(VERSION 3.21)\n'
+                        'project(QtCompatibilityFixture NONE)\n'
+                        f'set(APPLE {apple})\n'
+                        'add_library(WrapOpenGL::WrapOpenGL INTERFACE IMPORTED)\n'
+                        f'set_property(TARGET WrapOpenGL::WrapOpenGL PROPERTY INTERFACE_LINK_LIBRARIES "{links}")\n'
+                        'include("${NEXUS_SOURCE_DIR}/cmake/NexusQtCompatibility.cmake")\n'
+                        'nexus_fix_legacy_qt_agl()\n'
+                        'get_target_property(actual WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)\n'
+                        'file(WRITE "${CMAKE_BINARY_DIR}/links.txt" "${actual}")\n',
+                        encoding="utf-8",
+                    )
+                    build = root / "build"
+                    result = subprocess.run(
+                        [cmake, "-S", str(root), "-B", str(build),
+                         f"-DNEXUS_SOURCE_DIR:PATH={ROOT}"],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, timeout=60, check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertEqual((build / "links.txt").read_text(), expected)
+
     def test_macos_release_jobs_use_supported_arm64_runners(self):
         workflow = (ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
         runners = re.findall(r"- os:\s*(macos-\S+)\s*\n\s*platform:\s*macOS", workflow)

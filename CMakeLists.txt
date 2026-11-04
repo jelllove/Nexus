@@ -25,6 +25,9 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
     WebChannel
 )
 
+include(cmake/NexusQtCompatibility.cmake)
+nexus_fix_legacy_qt_agl()
+
 add_library(NexusPlatform STATIC
     src/platform/GlobalHotkey.cpp
     src/platform/GlobalHotkey.h
@@ -131,6 +134,8 @@ if(BUILD_TESTING)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_installer_verification.py)
     add_test(NAME ReleasePreparationTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_release_preparation.py)
+    set_tests_properties(ReleasePreparationTest PROPERTIES
+        ENVIRONMENT "NEXUS_CMAKE_COMMAND=${CMAKE_COMMAND}")
     add_test(NAME NativePackageTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_native_package.py)
     add_test(NAME InstallerSmokeCliTest

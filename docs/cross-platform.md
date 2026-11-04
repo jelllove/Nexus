@@ -73,6 +73,10 @@ restores the SDK; a restore collision preserves data and fails verification.
 Publication requires the `developerQtExcluded` evidence flag as well as the
 existing native checks. This avoids a second macOS runner allocation without
 changing the macOS ARM64 target or dropping any of the six native environments.
+The project-scoped Qt compatibility helper removes the obsolete, unused AGL
+fallback exported by older Qt on Apple platforms, preserving OpenGL and all
+other dependencies. This matches Qt's upstream removal for the macOS 26 SDK
+without modifying the installed Qt SDK or changing the pinned Qt version.
 Native validation results are recorded separately from local Windows checks.
 The v1.0.11 integration adds core SQLite/model regressions and an editor
 syntax/build reproducibility job to the existing native packaging gates.
