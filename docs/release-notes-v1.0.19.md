@@ -52,7 +52,9 @@ lists every other published package, screenshot and evidence ZIP.
 ## Native macOS verification without another runner allocation
 
 GitHub retired macOS 14 runners on November 2, 2026. macOS work uses the
-supported `macos-15` ARM64 image. To avoid a second allocation from the scarce
+supported current-GA `macos-26` ARM64 image. The deployment target remains
+macOS 12.0, matching Qt 6.8's baseline instead of raising the minimum to the
+build host's OS version. To avoid a second allocation from the scarce
 ARM64 runner pool, the build job also mounts and verifies its actual DMG.
 
 During that verification the developer Qt SDK is physically unavailable at

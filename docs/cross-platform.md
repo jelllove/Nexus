@@ -62,8 +62,9 @@ jobs required before release publication. The initial v1.0.9 design above remain
 the historical portable-package baseline; native packages do not replace it.
 
 The CI workflow builds, tests and packages on Windows, macOS and Ubuntu.
-macOS builds and installed-DMG verification share the allocated `macos-15`
-ARM64 runner, with an explicit native-architecture check. After packaging, the
+macOS builds and installed-DMG verification share the allocated `macos-26`
+ARM64 runner, with an explicit native-architecture check and a macOS 12.0
+deployment target matching the Qt 6.8 baseline. After packaging, the
 verifier temporarily renames the developer Qt SDK out of its original path
 and clears Qt-related runtime environment overrides. It mounts the actual DMG,
 copies the application to a fresh temporary directory, then requires editor

@@ -663,8 +663,10 @@ packages and screenshots, requires all four DEB/RPM lifecycle jobs, creates the 
 deployed runtime, and publishes a GitHub release only after these gates pass.
 Missing packages/evidence or a version mismatch block publication. Mirror
 releases reuse these verified assets rather than claiming a second validation.
-macOS builds and installed-DMG checks share one allocated `macos-15` ARM64
-runner, with an explicit native-architecture check. The DMG is installed into
+macOS builds and installed-DMG checks share one allocated `macos-26` ARM64
+runner, with an explicit native-architecture check. The deployment target
+remains macOS 12.0, matching the Qt 6.8 baseline rather than raising it to the
+runner OS version. The DMG is installed into
 a clean temporary directory while the developer Qt SDK is physically moved
 out of its original location and Qt-related environment overrides are removed.
 The SDK is restored afterward, including on verification failure; restore
