@@ -34,6 +34,13 @@ def sample_png():
 
 
 class ReleasePreparationTest(unittest.TestCase):
+    def test_macos_release_jobs_use_supported_arm64_runners(self):
+        workflow = (ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
+        runners = re.findall(r"- os:\s*(macos-\S+)\s*\n\s*platform:\s*macOS", workflow)
+        self.assertEqual(runners, ["macos-15", "macos-15"])
+        self.assertIn("cmake-options: '-DCMAKE_OSX_ARCHITECTURES=arm64'", workflow)
+        self.assertEqual(workflow.count('test "$(uname -m)" = arm64'), 2)
+
     def create_input(self, root):
         for system, packages in PACKAGE_NAMES.items():
             directory = root / f"Nexus-{system}"

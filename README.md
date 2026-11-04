@@ -663,6 +663,10 @@ packages and screenshots, requires all four DEB/RPM lifecycle jobs, creates the 
 deployed runtime, and publishes a GitHub release only after these gates pass.
 Missing packages/evidence or a version mismatch block publication. Mirror
 releases reuse these verified assets rather than claiming a second validation.
+macOS builds and installed-DMG checks use pinned `macos-15` ARM64 runners and
+check the native CPU architecture. GitHub
+[retired macOS 14 runners](https://github.com/actions/runner-images/issues/15226)
+on November 2, 2026; the package architecture and verification matrix are unchanged.
 The legacy `release.bat` is Windows-only; the CI tag workflow is the
 cross-platform release path.
 

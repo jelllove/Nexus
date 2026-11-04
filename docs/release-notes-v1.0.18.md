@@ -54,6 +54,14 @@ provides checksums for every other published file.
 - Pending editor changes must save before analysis or creation. Successful
   creation opens the new note, including from archived, deleted or search views.
 
+## Supported macOS release runners
+
+macOS builds and installed-DMG verification now use `macos-15` ARM64 runners
+with explicit native-architecture checks. GitHub
+[retired all macOS 14 runners](https://github.com/actions/runner-images/issues/15226)
+on November 2, 2026. Package architectures and all native verification gates
+remain unchanged.
+
 ## Upgrading and verification
 
 Save notes and use **File > Quit** before installing; closing the main window

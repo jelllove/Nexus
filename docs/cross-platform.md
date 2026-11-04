@@ -62,6 +62,9 @@ jobs required before release publication. The initial v1.0.9 design above remain
 the historical portable-package baseline; native packages do not replace it.
 
 The CI workflow builds, tests and packages on Windows, macOS and Ubuntu.
+Both macOS builds and installed-DMG verification use pinned `macos-15` ARM64
+runners, with explicit native-architecture checks. This replaces the retired
+macOS 14 runner without changing the macOS ARM64 package target.
 Native validation results are recorded separately from local Windows checks.
 The v1.0.11 integration adds core SQLite/model regressions and an editor
 syntax/build reproducibility job to the existing native packaging gates.
