@@ -58,6 +58,7 @@ set(SOURCES
     src/ui/ExportProgressDialog.cpp
     src/ui/MarkdownPreviewDialog.cpp
     src/ui/ActivitySummaryDialog.cpp
+    src/ui/TaskCreationDialog.cpp
     src/ui/EditorPane.cpp
     src/ui/SearchBar.cpp
     src/ui/WindowTitleBar.cpp
@@ -68,6 +69,7 @@ set(SOURCES
     src/services/UpdateService.cpp
     src/services/TaskExportService.cpp
     src/services/ActivitySummaryService.cpp
+    src/services/TaskCreationService.cpp
     src/platform/InstallerSmoke.cpp
 )
 
@@ -77,6 +79,7 @@ set(HEADERS
     src/models/Product.h
     src/models/Task.h
     src/models/TaskActivity.h
+    src/models/TaskCreation.h
     src/models/ProductListModel.h
     src/models/TaskListModel.h
     src/ui/ProductPane.h
@@ -86,6 +89,7 @@ set(HEADERS
     src/ui/ExportProgressDialog.h
     src/ui/MarkdownPreviewDialog.h
     src/ui/ActivitySummaryDialog.h
+    src/ui/TaskCreationDialog.h
     src/ui/EditorPane.h
     src/ui/SearchBar.h
     src/ui/WindowTitleBar.h
@@ -96,6 +100,7 @@ set(HEADERS
     src/services/UpdateService.h
     src/services/TaskExportService.h
     src/services/ActivitySummaryService.h
+    src/services/TaskCreationService.h
     src/platform/InstallerSmoke.h
 )
 
@@ -170,6 +175,17 @@ if(BUILD_TESTING)
         -o "${CMAKE_CURRENT_BINARY_DIR}/SubtaskMoveTest.txt,txt")
     set_tests_properties(SubtaskMoveTest PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
+        TIMEOUT 60)
+    add_executable(TaskCreationTest tests/TaskCreationTest.cpp ${UPDATE_UI_TEST_SOURCES} ${HEADERS} ${RESOURCES})
+    target_include_directories(TaskCreationTest PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(TaskCreationTest PRIVATE NexusPlatform Qt6::Widgets Qt6::Sql Qt6::Network Qt6::Concurrent
+        Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Test)
+    set_target_properties(TaskCreationTest PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
+    add_test(NAME TaskCreationTest COMMAND TaskCreationTest
+        -o -,txt -o "${CMAKE_CURRENT_BINARY_DIR}/TaskCreationTest.junit.xml,junitxml")
+    set_tests_properties(TaskCreationTest PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu"
         TIMEOUT 60)
     add_executable(ActivitySummaryTest
         tests/ActivitySummaryTest.cpp

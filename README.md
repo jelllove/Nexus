@@ -105,12 +105,52 @@ Each new release includes its own version-specific screenshots and evidence.
 - **Global Hotkey** — Control+Shift+N using Win32, macOS Carbon, or Linux X11; native Wayland hotkeys are not supported
 - **GitHub Release Auto-Update** — Checks on startup and every 6 hours (including in the system tray), asks before downloading, supports 1/2/3-month reminder pauses, and shows cancellable download progress
 - **AI Integration** — OpenAI-compatible API for AI-powered title generation from task content
+- **AI Quick Task** — Describe work in one capture box, review an AI-suggested project and parent task, then create an editable main task, subtask, or new project with a task
 - **AI Activity Summary** — Preview tasks created/modified during a selected period, then explicitly send them to your configured AI for a copyable/saveable Markdown report
 - **Image Support** — Paste or drag images into the editor; stored locally in the platform's application-data directory
 - **Content History** — Automatic snapshots for undo/redo support
 - **Markdown Export** — Export selected Active tasks via Product → Main Task → Sub Task selection, optional AI one-line summaries with extra confirmation, progress dialog with logs/cancel, and a nested pure-Markdown tree output
 - **Markdown Preview** — Reuse the same selection/summarization pipeline and open a non-modal preview window with `Copy Markdown`, `Copy HTML`, and `Save As .md`
 - **Database Maintenance** — Daily `VACUUM INTO` backups and delayed weekly background compaction (`wal_checkpoint(TRUNCATE)` + `VACUUM`)
+
+## AI quick task creation
+
+Click **AI Quick Task** beside the search bar, choose **File > AI Quick Task**,
+or press **Ctrl+Alt+N** (**Command+Option+N** on macOS). No project needs to be
+selected first. This shortcut works while Nexus is active; the existing global
+**Control+Shift+N** still shows/hides Nexus. Reopening an already-open capture
+window retains its unfinished input.
+
+1. Write a plain-text description and click **Analyze with AI...**. Configure
+   the endpoint, API key and model in Settings first, or use **Manual setup**
+   without sending anything to AI.
+2. Confirm before sending. **Show Details** displays the exact JSON containing
+   your input, active project names, eligible main-task titles and bounded
+   plain-text note excerpts. It excludes settings and attachments. Only active,
+   unfinished main tasks in active projects can be parents; archived/deleted
+   tasks and completed parents are excluded regardless of the current list view.
+3. Review the recommendation. Choose **New main task**, **Subtask of an existing
+   task**, or **New project and main task**. Change the project, parent, project
+   name, title or context as needed. Project and parent dropdowns support typing
+   to search; select an actual entry rather than leaving unmatched text.
+   Uncertain AI matches leave the destination unselected.
+4. Click **Create** to save and open the new note. New main tasks default to
+   **P1 High**, with a priority dropdown in the review form and the usual
+   priority controls afterward. Subtasks have no independent priority; creating
+   one does not change the parent's priority, content or work status.
+
+AI analysis and review never create records. Cancel aborts an outstanding
+request, and errors retain your input for retry or manual setup. Creation checks
+the destination again and saves all new records in one transaction, so a failed
+task cannot leave an empty new project behind. Current editor changes must save
+successfully before analysis or final creation.
+
+Input is limited to 8,000 characters, titles to 160, new project names to 120,
+and context to 16,000. AI source is capped at 64,000 characters; excerpts are
+at most 480 characters per task. If necessary, `notesIncluded: false` explicitly
+omits excerpts while retaining every eligible destination ID and title. If
+titles alone exceed the cap, use manual setup instead. Context is stored as
+escaped note text, not executable AI-generated HTML.
 
 ## Task list filtering
 
@@ -675,6 +715,18 @@ suite so it does not depend on a working hardware GPU context.
 The regression suite covers product/task lifecycle, due-date ordering, subtasks,
 search index updates, settings, model roles and reorder transaction failures.
 JUnit results are written to `build/tests/nexus-core.junit.xml`.
+
+The AI quick-task tests use an in-memory database and a loopback fake AI server,
+never a personal database or production AI endpoint. For a focused check after
+building `TaskCreationTest` and `NexusCoreTests`, run:
+
+```powershell
+ctest --test-dir build -C Release --output-on-failure --no-tests=error -R "^(TaskCreationTest|nexus-core)$"
+```
+
+They cover AI source/response validation, editable recommendations, all three
+creation kinds, consent, cancellation, stale destinations, safe context,
+save failures and atomic insert/commit rollback.
 
 To rebuild the editor after changing its dependencies or entry point:
 

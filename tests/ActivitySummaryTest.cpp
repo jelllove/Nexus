@@ -23,46 +23,7 @@
 #include "services/AIService.h"
 #include "ui/ActivitySummaryDialog.h"
 #include "ui/MarkdownPreviewDialog.h"
-
-class FakeAiServer : public QTcpServer
-{
-public:
-    QByteArray body;
-    QByteArray authorization;
-    QString response = R"({"choices":[{"message":{"content":"# Weekly summary\nSynthetic result"}}]})";
-    bool holdResponse = false;
-    int statusCode = 200;
-    int requests = 0;
-
-    FakeAiServer()
-    {
-        connect(this, &QTcpServer::newConnection, this, [this]() {
-            auto *socket = nextPendingConnection();
-            auto data = std::make_shared<QByteArray>();
-            connect(socket, &QTcpSocket::readyRead, socket, [this, socket, data]() {
-                data->append(socket->readAll());
-                int boundary = data->indexOf("\r\n\r\n");
-                if (boundary < 0 || socket->property("handled").toBool()) return;
-                const auto headers = data->left(boundary);
-                const auto match = QRegularExpression("Content-Length: (\\d+)", QRegularExpression::CaseInsensitiveOption)
-                                       .match(QString::fromUtf8(headers));
-                if (!match.hasMatch() || data->size() < boundary + 4 + match.captured(1).toInt()) return;
-                socket->setProperty("handled", true);
-                ++requests;
-                for (const auto &line : headers.split('\n'))
-                    if (line.trimmed().toLower().startsWith("authorization:")) authorization = line.trimmed();
-                body = data->mid(boundary + 4);
-                if (holdResponse) return;
-                const auto bytes = response.toUtf8();
-                socket->write("HTTP/1.1 " + QByteArray::number(statusCode)
-                              + " Test response\r\nContent-Type: application/json\r\nContent-Length: "
-                              + QByteArray::number(bytes.size()) + "\r\nConnection: close\r\n\r\n" + bytes);
-                socket->disconnectFromHost();
-            });
-            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
-        });
-    }
-};
+#include "FakeAiServer.h"
 
 class ActivitySummaryTest : public QObject
 {
@@ -483,7 +444,7 @@ private slots:
             [&](const QString &s) { result = s; }, [&](const QString &s) { error = s; });
         QVERIFY(timedOut);
         QCOMPARE(timedOut->request().transferTimeout(), 60000);
-        timedOut->setProperty("activitySummaryTimedOut", true);
+        timedOut->setProperty("aiRequestTimedOut", true);
         timedOut->abort();
         QTRY_VERIFY(error.contains("timed out"));
         QVERIFY(result.isEmpty());

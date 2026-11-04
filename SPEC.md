@@ -13,6 +13,9 @@ Help users manage tasks and rich notes in a desktop application.
   it before deciding whether to open it.
 - As a task-list user, I want one checkbox to hide completed tasks and show
   them again when needed.
+- As a task creator, I want to describe work once, review an AI-suggested
+  project/task destination, and create a main task or subtask without first
+  navigating through the project tree.
 
 ## Functional Requirements
 
@@ -49,6 +52,32 @@ Help users manage tasks and rich notes in a desktop application.
 - See the [completion visibility design](docs/superpowers/specs/2026-10-20-task-completion-visibility-design.md)
   for full behavior and verification coverage.
 
+### AI task creation
+
+- Provide a visible main-window action and Ctrl+Alt+N (Command+Option+N on
+  macOS) to open one non-modal, note-like plain-text capture dialog. Preserve
+  the existing global visibility shortcut and unfinished capture input.
+- Analyze only after explicit consent to send the input, active project names,
+  eligible main-task titles and bounded plain-text note excerpts to the
+  configured AI. Show the exact JSON source in the consent dialog's details;
+  omit settings, attachments, archived/deleted tasks and completed parents.
+- Recommend a subtask under a related main task, a new main task in an existing
+  project, or a new project plus main task. Uncertain matches leave destinations
+  unselected for manual choice. Reject invented IDs and inconsistent parents.
+- Before final creation, allow editing creation kind, project, parent task,
+  new project name, title and plain-text context. Support manual setup without
+  AI configuration or after an AI failure.
+- Default new main tasks to P1 High and permit priority changes in the review
+  form. Subtasks retain the existing model without independent priority and
+  never change their parent's priority or work status.
+- Never create a record during matching or review. Final confirmation validates
+  current destinations and atomically saves the project/task/subtask and escaped
+  context. Errors preserve the draft and remain visible; cancellation aborts
+  pending AI requests without accepting late results.
+- Include all eligible destination IDs and titles in the bounded AI source.
+  If necessary, explicitly omit note excerpts rather than dropping destinations.
+  If titles alone exceed the limit, explain the limit and offer manual setup.
+
 ## Non-Goals
 
 - Fetching link previews, page titles or remote metadata on hover.
@@ -61,6 +90,10 @@ Help users manage tasks and rich notes in a desktop application.
   search counts and an explanation when all results are hidden.
 - Regression coverage includes subtree visibility, expansion/selection restore,
   save/status/settings failures and movement through hidden tasks or siblings.
+- AI task creation tests use synthetic SQLite and a loopback AI server to verify
+  all destination kinds, editable recommendations, uncertain matches, consent,
+  cancellation, malformed responses, stale destinations, safe context rendering,
+  save failures, transaction ownership and insert/commit rollback.
 
 - Hovering editable hyperlink text, including nested formatting, shows its
   destination through DOM events and the editor bridge without
@@ -74,4 +107,5 @@ Help users manage tasks and rich notes in a desktop application.
 
 ## Open Questions
 
-None for hyperlink hover/authoring and task completion visibility.
+None for hyperlink hover/authoring, task completion visibility and AI task
+creation. The capture shortcut is application-local, not a second global hotkey.

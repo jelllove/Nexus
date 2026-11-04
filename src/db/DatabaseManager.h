@@ -6,6 +6,7 @@
 #include "models/Product.h"
 #include "models/Task.h"
 #include "models/TaskActivity.h"
+#include "models/TaskCreation.h"
 
 class DatabaseManager : public QObject
 {
@@ -53,6 +54,8 @@ public:
     void purgeOldDeletedTasks(int maxAgeDays = 30);
     QList<Task> getDeletedTasks();
     bool reorderTasks(const QList<int> &taskIds);
+    bool collectTaskCreationCatalog(TaskCreationCatalog &catalog, QString &error);
+    bool createTaskFromDraft(const TaskCreationDraft &draft, TaskCreationResult &result, QString &error);
 
     // Sub-task CRUD
     SubTask getSubtask(int subtaskId);

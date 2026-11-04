@@ -8,6 +8,7 @@
 #include "ui/ExportProgressDialog.h"
 #include "ui/MarkdownPreviewDialog.h"
 #include "ui/ActivitySummaryDialog.h"
+#include "ui/TaskCreationDialog.h"
 #include "ui/WindowTitleBar.h"
 #include <QCloseEvent>
 #include <QMenuBar>
@@ -110,6 +111,20 @@ void MainWindow::setupUi()
     headerLayout->setSpacing(0);
     m_searchBar = new SearchBar(header);
     headerLayout->addWidget(m_searchBar, 1);
+    auto *taskCreationButton = new QPushButton("AI Quick Task", header);
+    taskCreationButton->setObjectName("taskCreationButton");
+    taskCreationButton->setAccessibleName("AI quick task creation");
+    taskCreationButton->setToolTip("Describe a task, review AI suggestions, then create it ("
+                                 + QKeySequence("Ctrl+Alt+N").toString(QKeySequence::NativeText) + ").");
+    taskCreationButton->setCursor(Qt::PointingHandCursor);
+    taskCreationButton->setStyleSheet(
+        "QPushButton { background-color: #2980b9; color: white; border: 1px solid #2980b9; "
+        "padding: 6px 12px; border-radius: 6px; font-size: 11px; font-weight: bold; }"
+        "QPushButton:hover { background-color: #2471a3; }"
+        "QPushButton:focus { border-color: #154360; }");
+    headerLayout->addWidget(taskCreationButton, 0, Qt::AlignVCenter);
+    headerLayout->addSpacing(8);
+    connect(taskCreationButton, &QPushButton::clicked, this, &MainWindow::showTaskCreation);
     m_updateButton = new QPushButton("Update", header);
     m_updateButton->setObjectName("updateButton");
     m_updateButton->setAccessibleName("Update Nexus");
@@ -234,6 +249,14 @@ void MainWindow::setupMenuBar()
 
     // File menu
     QMenu *fileMenu = menuBar->addMenu("&File");
+
+    auto *taskCreationAction = fileMenu->addAction("AI &Quick Task...");
+    taskCreationAction->setObjectName("taskCreationAction");
+    taskCreationAction->setShortcut(QKeySequence("Ctrl+Alt+N"));
+    taskCreationAction->setShortcutContext(Qt::ApplicationShortcut);
+    addAction(taskCreationAction);
+    connect(taskCreationAction, &QAction::triggered, this, &MainWindow::showTaskCreation);
+    fileMenu->addSeparator();
 
     QAction *exportAction = fileMenu->addAction("Export &Tasks to Markdown...");
     connect(exportAction, &QAction::triggered, this, &MainWindow::exportTasksToMarkdown);
@@ -582,6 +605,46 @@ void MainWindow::onSummaryGenerated(const QString &summary)
         statusBar()->showMessage("Summary added.", 5000);
     }
     m_currentTaskIdForSummary = -1;
+}
+
+void MainWindow::showTaskCreation()
+{
+    auto *dialog = findChild<TaskCreationDialog *>();
+    if (!dialog) {
+        dialog = new TaskCreationDialog(this, [this]() { return m_editorPane->savePendingContent(); });
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        connect(dialog, &TaskCreationDialog::taskCreated, this, [this](int projectId, int taskId, int subtaskId) {
+            m_searchActive = false;
+            m_searchSnapshot = {};
+            {
+                const QSignalBlocker blocker(m_searchBar);
+                m_searchBar->clear();
+            }
+            {
+                const QSignalBlocker blocker(m_productPane);
+                m_productPane->loadProducts();
+            }
+            if (!m_productPane->selectProductById(projectId, false)) {
+                qWarning() << "Could not select created task's project:" << projectId;
+                statusBar()->showMessage("Task created, but its project could not be shown. Reopen the project.", 6000);
+                return;
+            }
+            if (subtaskId > 0) {
+                if (!m_taskPane->revealSubTask(subtaskId, true)) {
+                    qWarning() << "Could not reveal created subtask:" << subtaskId;
+                    statusBar()->showMessage("Subtask created, but could not be shown. Reopen its parent task.", 6000);
+                    return;
+                }
+                m_editorPane->loadSubTask(subtaskId);
+            } else {
+                m_taskPane->restoreView(projectId, TaskPane::ViewMode::Active, taskId);
+            }
+            statusBar()->showMessage(subtaskId > 0 ? "Subtask created." : "Task created.", 4000);
+        });
+    }
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
 }
 
 void MainWindow::showSettings()

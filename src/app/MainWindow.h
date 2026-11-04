@@ -50,6 +50,7 @@ private slots:
     void exportTasksToMarkdown();
     void previewTasksAsMarkdown();
     void showSettings();
+    void showTaskCreation();
     void onUpdateAvailable(const QString &latestVersion, const QString &downloadUrl,
                            const QString &releaseNotes, bool manual);
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);

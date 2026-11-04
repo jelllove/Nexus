@@ -25,6 +25,10 @@ public:
         std::function<void(const QString &)> onSuccess,
         std::function<void(const QString &)> onFailure,
         ActivitySummaryLanguage language = ActivitySummaryLanguage::English);
+    QNetworkReply *suggestTaskCreation(
+        const QString &source,
+        std::function<void(const QString &)> onSuccess,
+        std::function<void(const QString &)> onFailure);
     void verifyConnection(const QString &endpoint, const QString &apiKey, const QString &model);
 
 signals:

@@ -1154,6 +1154,135 @@ bool DatabaseManager::reorderTasks(const QList<int> &taskIds)
     return true;
 }
 
+bool DatabaseManager::collectTaskCreationCatalog(TaskCreationCatalog &catalog, QString &error)
+{
+    catalog = {};
+    error.clear();
+    auto fail = [&error](const QString &message) {
+        error = "Could not load active projects and tasks: " + message;
+        qWarning() << "Failed to collect task creation catalog:" << message;
+        return false;
+    };
+    TaskCreationCatalog collected;
+    QSqlQuery query(m_db);
+    if (!query.exec("SELECT id, name FROM products "
+                    "WHERE LOWER(TRIM(COALESCE(status, ''))) <> 'archived' ORDER BY sort_order, id"))
+        return fail(query.lastError().text());
+    while (query.next()) {
+        Product project;
+        project.id = query.value(0).toInt();
+        project.name = query.value(1).toString();
+        collected.projects.append(project);
+    }
+    if (query.lastError().isValid()) return fail(query.lastError().text());
+    query.finish();
+    if (!query.exec("SELECT t.id, t.product_id, t.title, t.content, t.priority, t.work_status "
+                    "FROM tasks t JOIN products p ON p.id = t.product_id "
+                    "WHERE t.status = 'active' AND COALESCE(t.work_status, 0) <> 3 "
+                    "AND LOWER(TRIM(COALESCE(p.status, ''))) <> 'archived' "
+                    "ORDER BY p.sort_order, p.id, t.priority, t.sort_order, t.id"))
+        return fail(query.lastError().text());
+    while (query.next()) {
+        Task task;
+        task.id = query.value(0).toInt();
+        task.productId = query.value(1).toInt();
+        task.title = query.value(2).toString();
+        task.content = query.value(3).toString();
+        task.priority = static_cast<TaskPriority>(query.value(4).toInt());
+        task.workStatus = taskWorkStatusFromDb(query.value(5).toInt());
+        collected.tasks.append(task);
+    }
+    if (query.lastError().isValid()) return fail(query.lastError().text());
+    catalog = collected;
+    return true;
+}
+
+bool DatabaseManager::createTaskFromDraft(const TaskCreationDraft &draft, TaskCreationResult &result,
+                                         QString &error)
+{
+    result = {};
+    error.clear();
+    bool transactionOpen = false;
+    auto fail = [&](const QString &message) {
+        if (transactionOpen && !m_db.rollback())
+            qWarning() << "Failed to roll back task creation:" << m_db.lastError().text();
+        error = message;
+        qWarning() << "Failed to create task from draft:" << message;
+        return false;
+    };
+    const QString validation = draft.validationError();
+    if (!validation.isEmpty()) return fail(validation);
+    if (!m_db.transaction()) return fail(m_db.lastError().text());
+    transactionOpen = true;
+
+    TaskCreationResult created;
+    QSqlQuery query(m_db);
+    if (draft.kind == TaskCreationKind::NewProject) {
+        if (!query.exec("SELECT name FROM products")) return fail(query.lastError().text());
+        while (query.next()) {
+            if (query.value(0).toString().trimmed().compare(draft.projectName.trimmed(), Qt::CaseInsensitive) == 0) {
+                query.finish();
+                return fail("A project with this name already exists. Select it, or reactivate it first.");
+            }
+        }
+        if (query.lastError().isValid()) return fail(query.lastError().text());
+        query.finish();
+        query.prepare("INSERT INTO products (name) VALUES (?)");
+        query.addBindValue(draft.projectName.trimmed());
+        if (!query.exec()) return fail(query.lastError().text());
+        created.projectId = query.lastInsertId().toInt();
+    } else {
+        query.prepare("SELECT status FROM products WHERE id = ?");
+        query.addBindValue(draft.projectId);
+        if (!query.exec()) return fail(query.lastError().text());
+        if (!query.next()) return fail("The selected project no longer exists. Choose another project.");
+        if (productStatusFromDb(query.value(0).toString()) != ProductStatus::Active)
+            return fail("Choose an active project, or reactivate the selected project first.");
+        query.finish();
+        created.projectId = draft.projectId;
+    }
+
+    QString context = draft.context.trimmed();
+    context.replace("\r\n", "\n").replace('\r', '\n');
+    const QString content = "<p>" + context.toHtmlEscaped().replace("\n", "</p><p>") + "</p>";
+    if (draft.kind == TaskCreationKind::Subtask) {
+        query.prepare("SELECT product_id, status, work_status FROM tasks WHERE id = ?");
+        query.addBindValue(draft.parentTaskId);
+        if (!query.exec()) return fail(query.lastError().text());
+        if (!query.next()) return fail("The selected parent task no longer exists. Choose another parent.");
+        if (query.value(0).toInt() != created.projectId
+            || query.value(1).toString() != "active"
+            || taskWorkStatusFromDb(query.value(2).toInt()) == TaskWorkStatus::Completed)
+            return fail("Choose an active, unfinished parent task in the selected project.");
+        query.finish();
+        created.taskId = draft.parentTaskId;
+        query.prepare("INSERT INTO subtasks (task_id, title, content, completed, work_status, sort_order, updated_at) "
+                      "VALUES (?, ?, ?, 0, 0, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subtasks WHERE task_id = ?), CURRENT_TIMESTAMP)");
+        query.addBindValue(created.taskId);
+        query.addBindValue(draft.title.trimmed());
+        query.addBindValue(content);
+        query.addBindValue(created.taskId);
+        if (!query.exec()) return fail(query.lastError().text());
+        created.subtaskId = query.lastInsertId().toInt();
+    } else {
+        query.prepare("INSERT INTO tasks (product_id, title, content, priority, work_status) VALUES (?, ?, ?, ?, 0)");
+        query.addBindValue(created.projectId);
+        query.addBindValue(draft.title.trimmed());
+        query.addBindValue(content);
+        query.addBindValue(static_cast<int>(draft.priority));
+        if (!query.exec()) return fail(query.lastError().text());
+        created.taskId = query.lastInsertId().toInt();
+    }
+    query.finish();
+    if (!m_db.commit()) return fail(m_db.lastError().text());
+    transactionOpen = false;
+    result = created;
+    if (draft.kind == TaskCreationKind::NewProject) emit productAdded(result.projectId);
+    if (draft.kind == TaskCreationKind::Subtask) emit taskUpdated(result.taskId);
+    else emit taskAdded(result.taskId);
+    return true;
+}
+
 // --- Sub-tasks ---
 
 SubTask DatabaseManager::getSubtask(int subtaskId)
