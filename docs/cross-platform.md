@@ -74,7 +74,7 @@ Publication requires the `developerQtExcluded` evidence flag as well as the
 existing native checks. This avoids a second macOS runner allocation without
 changing the macOS ARM64 target or dropping any of the six native environments.
 The project-scoped Qt compatibility helper removes the obsolete, unused AGL
-fallback exported by older Qt on Apple platforms, preserving OpenGL and all
+flag or framework path exported by older Qt on Apple platforms, preserving OpenGL and all
 other dependencies. This matches Qt's upstream removal for the macOS 26 SDK
 without modifying the installed Qt SDK or changing the pinned Qt version.
 Native validation results are recorded separately from local Windows checks.

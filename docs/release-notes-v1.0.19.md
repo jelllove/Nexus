@@ -58,7 +58,7 @@ build host's OS version. To avoid a second allocation from the scarce
 ARM64 runner pool, the build job also mounts and verifies its actual DMG.
 
 Qt remains 6.8.3. A scoped CMake compatibility helper removes its obsolete,
-unused AGL fallback on Apple platforms, matching Qt's upstream fix for the
+unused AGL flag or framework path on Apple platforms, matching Qt's upstream fix for the
 macOS 26 SDK. OpenGL and other dependencies remain linked normally.
 
 During that verification the developer Qt SDK is physically unavailable at

@@ -47,6 +47,10 @@ class ReleasePreparationTest(unittest.TestCase):
             ("FALSE", "-framework OpenGL;-framework AGL;keep-library",
              "-framework OpenGL;-framework AGL;keep-library"),
             ("TRUE", "-framework OpenGL;keep-library", "-framework OpenGL;keep-library"),
+            ("TRUE", "-framework OpenGL;/System/Library/Frameworks/AGL.framework;keep-library",
+             "-framework OpenGL;keep-library"),
+            ("TRUE", "/sdk/AGL.framework/Versions/A/AGL;/sdk/NotAGL.framework;-framework OpenGL",
+             "/sdk/NotAGL.framework;-framework OpenGL"),
         )
         for apple, links, expected in cases:
             with self.subTest(apple=apple, links=links):

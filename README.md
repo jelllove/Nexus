@@ -677,8 +677,8 @@ avoids a second macOS runner allocation without skipping native verification.
 GitHub
 [retired macOS 14 runners](https://github.com/actions/runner-images/issues/15226)
 on November 2, 2026; the package architecture and verification matrix are unchanged.
-For older Qt metadata, the build removes only the unused `-framework AGL`
-fallback from the imported OpenGL interface, matching
+For older Qt metadata, the build removes only the unused AGL flag or framework
+path from the imported OpenGL interface, matching
 [Qt's upstream fix](https://github.com/qt/qtbase/commit/cdb33c3d5621ce035ad6950c8e2268fe94b73de5)
 for the macOS 26 SDK. Qt stays at 6.8.3; OpenGL and all other link dependencies remain.
 The legacy `release.bat` is Windows-only; the CI tag workflow is the
